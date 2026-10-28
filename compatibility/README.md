@@ -58,5 +58,5 @@ are not executed. It uses a dedicated transient database and schema.
 
 Cloud verification must inspect remote run status and artifacts, not just the
 CLI exit code: the Cloud CLI can return zero after a remote dbt operation fails.
-The checked-in results record the actual tested engine and run IDs; Cloud release
-tracks can change independently of local Core releases.
+The [checked-in results](results.json) record tested versions and Cloud outcomes.
+Cloud release tracks can change independently of local Core releases.
