@@ -4,11 +4,15 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 
-SCHEMA = "dbt_markers.plan.v1"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from examples.plan_graph import add_hooks, add_lineage, execution_edges
+
+SCHEMA = "dbt_markers.plan.v2"
 COLLECTIONS = ("nodes", "sources", "unit_tests", "functions")
 EXECUTABLE = {"model", "test", "seed", "snapshot", "unit_test", "function"}
 
@@ -46,8 +50,6 @@ def make_plan(manifest, results, selected, context, previous=None):
     nodes = {}
     for key, node in sorted(resources.items()):
         kind = node["resource_type"]
-        if kind == "operation":
-            continue
         dependencies = sorted(node.get("depends_on", {}).get("nodes", []))
         reasons = []
         macro_ids = set()
@@ -63,16 +65,23 @@ def make_plan(manifest, results, selected, context, previous=None):
                 pending.extend(macros[macro_id].get("depends_on", {}).get("macros", []))
         sql = node.get("compiled_code") if node.get("compiled") and node.get("language", "sql") == "sql" else None
         config = node.get("config", {})
+        if kind == "operation" and not any(token in node.get("raw_code", "") for token in ("{{", "{%", "{#")):
+            sql = node.get("raw_code")
         if kind in EXECUTABLE and not sql:
             reasons.append("compiled_sql_unavailable")
-        if kind not in {"model", "test", "source"}:
+        if kind not in {"model", "test", "source", "operation"}:
             reasons.append("unsupported_resource_type:" + kind)
         if kind == "model" and config.get("materialized") not in {"view", "table", "ephemeral"}:
             reasons.append("runtime_materialization:" + str(config.get("materialized")))
         if config.get("pre-hook") or config.get("post-hook"):
             reasons.append("runtime_hooks")
+        if kind == "operation" and not sql:
+            reasons.append("hook_requires_runtime_render")
         record = {
             "resource_type": kind,
+            "package_name": node.get("package_name"),
+            "tags": node.get("tags", []),
+            "hook_index": node.get("index", 0),
             "depends_on": dependencies,
             "relation_name": node.get("relation_name"),
             "database": node.get("database"),
@@ -89,8 +98,13 @@ def make_plan(manifest, results, selected, context, previous=None):
             "macro_hashes": {macro_id: digest(macros[macro_id]["macro_sql"]) for macro_id in sorted(macro_ids) if macro_id in macros},
             "unresolved": sorted(reasons),
         }
-        record["fingerprint"] = digest(record)
         nodes[key] = record
+    add_hooks(nodes)
+    add_lineage(nodes, manifest["metadata"]["adapter_type"], context.get("default_database"), context.get("default_schema"))
+    execution, execution_selected = execution_edges(nodes, selected, context.get("command", "build"), manifest["metadata"]["project_name"])
+    for node in nodes.values():
+        node["unresolved"] = sorted(set(node["unresolved"]))
+        node["fingerprint"] = digest(node)
     missing = {parent for node in nodes.values() for parent in node["depends_on"] if parent not in nodes}
     if missing:
         raise ValueError("Unresolved dependency IDs: " + ", ".join(sorted(missing)))
@@ -114,19 +128,21 @@ def make_plan(manifest, results, selected, context, previous=None):
         "context": context,
         "context_hash": context_hash,
         "graph_hash": graph_hash,
-        "plan_hash": digest({"graph_hash": graph_hash, "selected_resources": selected}),
+        "execution_edges": execution,
+        "execution_selected_resources": execution_selected,
+        "plan_hash": digest({"graph_hash": graph_hash, "selected_resources": selected, "execution_edges": execution, "execution_selected_resources": execution_selected}),
         "selected_resources": selected,
         "nodes": nodes,
     }
-    required = set(selected)
-    pending = list(selected)
+    required = set(execution_selected)
+    pending = list(execution_selected)
     while pending:
         for parent in nodes[pending.pop()]["depends_on"]:
             if parent not in required:
                 required.add(parent)
                 pending.append(parent)
-    plan["unresolved_nodes"] = {key: nodes[key]["unresolved"] for key in sorted(required) if nodes[key]["unresolved"]}
-    plan["unresolved_context"] = ["project_hooks"] if context["project_hooks"] else []
+    plan["unresolved_nodes"] = {key: nodes[key]["unresolved"] for key in sorted(required) if nodes[key]["unresolved"] and not (nodes[key]["resource_type"] == "seed" and key not in selected)}
+    plan["unresolved_context"] = []
     plan["compiled_selection_complete"] = not (plan["unresolved_nodes"] or plan["unresolved_context"])
     if previous is not None:
         if previous["schema"] != SCHEMA:
@@ -137,7 +153,7 @@ def make_plan(manifest, results, selected, context, previous=None):
             raise ValueError("Previous plan node fingerprint mismatch")
         if digest(previous["context"]) != previous["context_hash"] or digest({"context": previous["context_hash"], "nodes": old_fingerprints}) != previous["graph_hash"]:
             raise ValueError("Previous plan graph fingerprint mismatch")
-        if digest({"graph_hash": previous["graph_hash"], "selected_resources": previous["selected_resources"]}) != previous["plan_hash"]:
+        if digest({"graph_hash": previous["graph_hash"], "selected_resources": previous["selected_resources"], "execution_edges": previous["execution_edges"], "execution_selected_resources": previous["execution_selected_resources"]}) != previous["plan_hash"]:
             raise ValueError("Previous plan selection fingerprint mismatch")
     else:
         old = {}
@@ -148,8 +164,10 @@ def make_plan(manifest, results, selected, context, previous=None):
     roots = set(nodes) | set(old) if context_changed else added | removed | changed
     # Traverse both graphs: removed edges must invalidate their former descendants.
     edges = {key: {"depends_on": sorted(set(nodes.get(key, {}).get("depends_on", [])) | set(old.get(key, {}).get("depends_on", [])))} for key in nodes.keys() | old.keys()}
+    for edge in execution + (previous["execution_edges"] if previous else []):
+        edges[edge["to"]]["depends_on"].append(edge["from"])
     affected = descendants(roots, edges) & nodes.keys()
-    blocked = descendants({key for key, node in nodes.items() if node["unresolved"]}, nodes)
+    blocked = descendants(set(plan["unresolved_nodes"]), edges)
     plan["changes"] = {
         "context_changed": context_changed,
         "selection_changed": previous is None or previous["selected_resources"] != selected,
@@ -187,7 +205,7 @@ def compile_plan(args):
             if not line.startswith("{"):
                 continue
             node = json.loads(line)
-            if node.get("resource_type") in EXECUTABLE:
+            if node.get("resource_type") in ({"model"} if args.command == "run" else {"test", "unit_test"} if args.command == "test" else EXECUTABLE):
                 selected.append(node["unique_id"])
         if not selected:
             raise ValueError("Selection contains no executable resources")
@@ -200,7 +218,8 @@ def compile_plan(args):
         manifest = json.loads((root / "manifest.json").read_text())
         results = json.loads((root / "run_results.json").read_text())
         context = {"target": args.target, "profile": args.profile, "vars_hash": digest(args.vars),
-                   "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context}
+                   "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context,
+                   "command": args.command, "default_database": args.default_database, "default_schema": args.default_schema}
         plan = make_plan(manifest, results, selected, context, previous)
         if args.require_complete and not plan["compiled_selection_complete"]:
             raise ValueError("Selected plan has unresolved nodes/context: " + json.dumps({"nodes": plan["unresolved_nodes"], "context": plan["unresolved_context"]}))
@@ -212,6 +231,9 @@ def compile_plan(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dbt", default="dbt")
+    parser.add_argument("--command", choices=["build", "run", "test"], default="build")
+    parser.add_argument("--default-database")
+    parser.add_argument("--default-schema")
     parser.add_argument("--project-dir", type=Path, required=True)
     parser.add_argument("--profiles-dir", type=Path)
     parser.add_argument("--profile")

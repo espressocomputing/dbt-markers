@@ -35,7 +35,7 @@ def verify(dbt, root, smoke=False):
     records = {}
 
     def plan(label, previous=None, **overrides):
-        args = SimpleNamespace(dbt=dbt, project_dir=project, profiles_dir=project,
+        args = SimpleNamespace(dbt=dbt, project_dir=project, profiles_dir=project, command="build", default_database="warehouse", default_schema="canary",
                                profile=None, target="local", vars="{}", select="c", exclude=None,
                                full_refresh=False, warehouse_context="duckdb/planning-canary/local",
                                output=root / (label + ".json"), previous=root / (previous + ".json") if previous else None,
@@ -125,12 +125,13 @@ def verify(dbt, root, smoke=False):
     (project / "models/b.sql").write_text("{{ config(pre_hook='select 1') }}\n" + files["models/b.sql"])
     changed = plan("hook_unresolved", "baseline")
     assert "runtime_hooks" in changed["unresolved_nodes"][b]
+    assert any(node["resource_type"] == "hook" and node["compiled_sql"] == "select 1" for node in changed["nodes"].values())
     (project / "models/b.sql").write_text(files["models/b.sql"])
 
     (project / "dbt_project.yml").write_text(files["dbt_project.yml"] + "on-run-start: ['select 1']\n")
     changed = plan("project_hook_unresolved", "baseline")
-    assert changed["unresolved_context"] == ["project_hooks"]
-    assert not changed["compiled_selection_complete"]
+    assert any(edge["kind"] == "project_hook_order" for edge in changed["execution_edges"])
+    assert changed["compiled_selection_complete"]
     (project / "dbt_project.yml").write_text(files["dbt_project.yml"])
 
     (project / "models/units.yml").write_text("unit_tests:\n  - name: c_unit\n    model: c\n    given:\n      - input: ref('b')\n        rows: [{id: 1}]\n    expect:\n      rows: [{id: 1}]\n")
@@ -163,7 +164,7 @@ def verify(dbt, root, smoke=False):
     (project / "seeds/input.csv").write_text("id\n3\n4\n")
     subprocess.run([dbt, "--quiet", "seed", "--full-refresh", "--project-dir", str(project), "--profiles-dir", str(project)], check=True, capture_output=True, text=True)
     changed = plan("input_data_edit", "baseline")
-    assert c in changed["changes"]["unchanged"]
+    assert c in changed["changes"]["affected"]
     assert not changed["execution_sql_complete"]
     assert not changed["input_state_verified"] and not changed["execution_reuse_authorized"]
     return records
