@@ -175,58 +175,113 @@ acknowledgment from Nitro. No model-completion events or run results are sent.
 
 ## Compiled planning prototype (unmerged)
 
-`examples/plan.py` writes a `dbt_markers.plan.v1` document under `dbt_plan` for
-Nitro's future configuration interface. It includes the **full compiled SQL text**
-in each model/test node's `compiled_sql`, alongside source text, dependencies,
-relation identity, configuration, and SHA-256 fingerprints. It does not replace
-SQL with hashes or construct the fused megaquery; that remains Nitro's job.
+`examples/plan.py` writes `dbt_markers.plan.v2` under `dbt_plan` for Nitro's
+future configuration interface. Nodes contain **full compiled SQL**, source,
+configuration, relation identity, declared and SQL-derived dependencies, and
+SHA-256 fingerprints. Optional Core capture adds full materialization/hook SQL
+and seed bindings in `generated_statements`; hashes never replace query text.
 
-Use an installed dbt Core or v2 CLI with project dependencies already installed:
+The planner's Python environment needs SQLGlot 30.x (verified with 30.13.0).
+Use an installed dbt CLI with project dependencies already installed:
 
 ```sh
-python3 examples/plan.py --dbt /path/to/dbt \
+python examples/plan.py --dbt /path/to/dbt \
   --project-dir /path/to/project --profiles-dir /path/to/profiles \
   --target dev --warehouse-context account/warehouse/role \
-  --select orders --output plan.json
-
-python3 examples/plan.py --dbt /path/to/dbt \
-  --project-dir /path/to/project --profiles-dir /path/to/profiles \
-  --target dev --warehouse-context account/warehouse/role \
-  --select orders --previous plan.json --output next-plan.json
+  --command build --select orders --output plan.json
 ```
 
-Each invocation runs `dbt ls` for selection and `dbt compile` for the **whole
-project**, with fresh artifacts. Compilation may query the warehouse through
-project macros. The supplied warehouse context must identify the account,
-warehouse, and role without credentials; change it when those change. Pass the
-same `--vars`, `--target`, and `--full-refresh` settings intended for execution.
-Output paths must be new so a failed compile cannot leave an old plan masquerading
-as the new one.
+Add `--previous plan.json --output next-plan.json` to compare snapshots. Every
+invocation runs `dbt ls` for selection and `dbt compile` for the **whole project**
+with fresh artifacts. Compilation can query the warehouse through project macros.
+Output paths must be new. Pass execution's target, vars and full-refresh settings;
+warehouse context must identify account, warehouse and role without credentials.
+Use `--default-database` and `--default-schema` only when they match the actual
+session's resolution of unqualified names; otherwise these reads stay unresolved.
 
-`graph_hash` excludes invocation IDs and selection. `plan_hash` additionally binds
-the selected resource IDs. Per-node fingerprints include exact compiled text,
-source, configuration, relation identity, dependencies, and referenced macro
-bodies. Materialization macros, project hooks, and compilation context are compared
-globally. These comparisons are conservative: formatting/configuration changes
-can invalidate plans even if SQL semantics happen to be equivalent.
+SQL lineage excludes CTE aliases, resolves physical relations to project nodes,
+and creates explicit external/prior-state inputs. Ambiguous relations, opaque
+SQL, unknown function bodies and cycles remain unresolved. `execution_edges`
+separately represents data dependencies, build test gates, unit-test ordering,
+and pre/post/project hooks. Ephemeral models remain logical nodes; they need not
+correspond to separate warehouse queries.
 
-`changes` reports added, removed, directly changed, and downstream-affected node
-IDs, plus selection additions/removals. Invalidation traverses both old and new
-edges. Nitro can map those IDs to fused-plan components. `selected_affected` is a
-**planning invalidation set, not an instruction to skip other selected nodes**.
+`graph_hash` binds node fingerprints and compilation context. `plan_hash` also
+binds selection and execution edges. Without capture, selection does not affect
+the graph hash; capture enriches the selected nodes. Fingerprints include exact
+SQL, config, dependencies and macro bodies. Metadata snapshots and parser versions
+also participate in invalidation. `changes` propagates changes through both old
+and new data/execution edges, including deleted nodes and tests. This is a
+conservative invalidation set, **not permission to skip execution**.
 
-Missing SQL, unit tests without compiled bodies, seeds, snapshots, Python models,
-incremental/custom materializations, and hooks remain unresolved. Unresolved
-ancestors block their selected descendants. `--require-complete` rejects unresolved
-selected plans; it still does not certify the complete warehouse statement stream.
+### Offline materialization capture
 
-Compiled bodies are available upfront, but materialization DDL/DML and runtime
-branches can differ at execution. The document always sets
-`execution_sql_complete`, `input_state_verified`, and `execution_reuse_authorized`
-to `false`. Nitro must validate runtime SQL, input schema/freshness, and incremental
-state before deciding what to execute or reuse. No Nitro consumer exists yet.
-This prototype writes a JSON file; it does not transmit it through the marker hook
-or automatically launch `dbt run`/`build`. Cloud CLI execution is not verified.
+Add these options using Python from the same dbt Core environment:
+
+```sh
+  --capture-python /path/to/dbt-env/bin/python \
+  --warehouse-state warehouse-state.json
+```
+
+That environment also needs SQLGlot (verified with 30.25.0). Capture is verified
+on Core 1.12.6 with Snowflake 1.12.4 and DuckDB 1.11.1. The ordinary compiled
+planner also has Core 1.6 and v2 smoke coverage; the internal Core capture hooks
+are **not a stable cross-version plugin API**. Native v2 and remote dbt Cloud
+capture are not supported or verified. Existing marker packaging is unchanged.
+
+Capture runs dbt's real materialization macros with standard adapter connection
+opening disabled. Relation/schema/column introspection uses an explicit snapshot:
+
+```json
+{
+  "schema": "dbt_markers.warehouse_state.v1",
+  "adapter_type": "snowflake",
+  "databases": {
+    "DATABASE": {"schemas": {"SCHEMA": {"relations": {
+      "ORDERS": {"type": "table", "columns": [
+        {"name": "ID", "data_type": "NUMBER"}
+      ]}
+    }}}}
+  }
+}
+```
+
+Use actual catalog identifier case. A listed schema's relation map must be
+complete, including an empty map only when the schema really is empty. Missing
+metadata blocks capture. For newly generated relations, `derived_columns` maps
+the SHA-256 of the exact captured CREATE SQL to the column list; capture does not
+invent expression types. Optional `query_results` maps exact stripped SQL to
+`{"columns": [...], "rows": [[...]], "kind": "metadata"}`. Only use that kind for
+metadata queries; data results default to `data` and retain their lineage.
+There is no automatic warehouse snapshot collector yet.
+
+Unknown results are lazy: discarded results allow generation to continue, but
+reading rows, column metadata or response values stops with an explicit blocker.
+Provably empty projections and simple literal queries can be resolved locally.
+A unit test can have all its SQL captured while its outcome remains unknown;
+blockers distinguish SQL generation from result validation. Tests do not receive
+invented passing outcomes, so dependent work can remain uncaptured.
+
+`sql_generation_complete` marks individual generated materializations;
+`selected_sql_generation_complete` requires successful capture of the selected
+invocation. Both are conditional on current supplied metadata and statements
+succeeding when executed. `execution_capture` retains the full trace, including
+unattributed setup statements and blockers. It records adapter submissions, not
+wire-level driver splitting, and omits query comments. Some adapter metadata
+methods are replaced by snapshot lookups rather than captured SQL.
+
+Capture is for trusted projects using the standard adapters. It is not a security
+sandbox for arbitrary Python/custom plugins that open their own connections.
+Python models, hidden stored-procedure/UDF dependencies, runtime-dependent hook
+branches, missing metadata and results remain explicit limits. The preceding
+whole-project compile is a normal dbt compile, not offline capture.
+
+`--require-complete` rejects unresolved selected compilation/lineage; it does not
+certify a complete wire trace. `execution_sql_complete`, `input_state_verified`
+and `execution_reuse_authorized` stay false. Nitro must check inputs and actual
+runtime SQL before reuse. This prototype writes JSON; it does not build the fused
+megaquery, transmit a plan through the marker hook, or integrate with a Nitro
+consumer. Keep this PR unmerged pending those acceptance requirements.
 
 ## Privacy
 

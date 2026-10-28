@@ -102,3 +102,33 @@ and repeat smoke checks. The eight existing marker/decoder tests also passed.
 The plans contain full compiled model/test query bodies as well as fingerprints.
 These checks do not establish exact materialization SQL, input freshness, Cloud
 compatibility, or a working Nitro integration. The planner remains a draft.
+
+### Plan v2 and offline SQL capture
+
+Plan v2 adds SQL-derived physical dependencies and separate execution edges for
+hooks, build tests and unit tests. The 17 Core 1.12.6 planning scenarios passed
+again, as did Core 1.6.0 and native v2 2.0.9 baseline/repeat smoke checks. Fourteen
+local tests cover transport plus lineage, CTE/quoted identifier resolution,
+prior-state DML reads, temporary relations, test gates and hook ordering.
+The Python running planning checks now needs SQLGlot 30.x.
+
+Run `python compatibility/capture.py --python /path/to/core/python --directory /new/path`.
+On Core 1.12.6 / Snowflake 1.12.4 / SQLGlot 30.25.0, all nine offline cases passed:
+table/view plus hooks, incremental projection metadata missing/supplied, bound
+seed inserts, unit-test projection metadata missing/full SQL generated, data-result
+read blocked, statement-response read blocked, and missing metadata blocked.
+These use the real Snowflake adapter/macros with connection opening prohibited;
+they do not execute against Snowflake. Full unit-test SQL is captured without
+pretending the unknown outcome passed.
+
+A separate DuckDB 1.11.1 local canary supplied metadata read from its actual
+warehouse, captured `run --select a+`, then executed that command. All 17
+model-attributed adapter statements across three models matched the real SQL log
+after comment removal and SQL formatting normalization, including transactions,
+CREATE, RENAME and DROP. Capture had left only the original input table in the
+warehouse before the real run. Setup/introspection SQL is not a complete match:
+some adapter metadata methods are replaced by snapshot lookups.
+
+Capture uses internal Core APIs and has only the version coverage stated above.
+It is not verified on Cloud or native v2. Neither input freshness, full wire SQL,
+query-history matching nor a Nitro consumer is certified by these checks.
