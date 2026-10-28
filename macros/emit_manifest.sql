@@ -9,10 +9,13 @@
             {%- set state.reason = "runtime graph unavailable" -%}
         {%- elif selected_resources is not defined -%}
             {%- set state.reason = "selected_resources unavailable; use on-run-start" -%}
+        {%- elif flags.WHICH in ["build", "test"] and "unit_tests" not in graph
+              and not (dbt_version.split('.')[0] == '1' and dbt_version.split('.')[1] | int < 8) -%}
+            {%- set state.reason = "runtime graph cannot describe unit-test execution for build/test" -%}
         {%- endif -%}
         {%- set nodes = {} -%}
         {%- if not state.reason -%}
-        {%- for collection in ["nodes", "sources", "exposures", "metrics", "semantic_models", "saved_queries", "unit_tests"] -%}
+        {%- for collection in ["nodes", "sources", "exposures", "metrics", "semantic_models", "saved_queries", "unit_tests", "functions"] -%}
             {%- for id, node in graph.get(collection, {}).items() | sort -%}
                 {%- set record = {
                     "resource_type": node.resource_type,
@@ -62,6 +65,7 @@
             "dbt_version": dbt_version,
             "command": flags.WHICH,
             "target_name": target.name,
+            "available_collections": graph.keys() | list | sort,
             "selected_resources": selected_resources | sort,
             "nodes": nodes,
         }) -%}

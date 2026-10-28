@@ -1,6 +1,8 @@
 """Run the package against a real dbt CLI using a disposable DuckDB project."""
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -12,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from examples.manifest_transport import extract_manifest
 
 
-def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False):
+def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False, python_api=False):
     root = Path(__file__).resolve().parents[1]
     shutil.copytree(root / "compatibility" / "project", directory)
     packages = (
@@ -40,18 +42,30 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False):
         "DO_NOT_TRACK": "1",
     }
     results = {}
+    if python_api:
+        from dbt.cli.main import dbtRunner
+        os.environ.update(env)
+        os.chdir(directory)
 
     def invoke(label, args, expect_graph=None):
         log = directory / "logs" / "dbt.log"
         log.unlink(missing_ok=True)
-        completed = subprocess.run(
-            [str(dbt), *args], cwd=directory, env=env, capture_output=True, text=True,
-            timeout=180,
-        )
-        output = completed.stdout + completed.stderr
+        if python_api:
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
+                result = dbtRunner().invoke(args)
+            output = stream.getvalue() + (str(result.exception) if result.exception else "")
+            returncode = 0 if result.success else 1
+        else:
+            completed = subprocess.run(
+                [str(dbt), *args], cwd=directory, env=env, capture_output=True, text=True,
+                timeout=180,
+            )
+            output = completed.stdout + completed.stderr
+            returncode = completed.returncode
         (directory / f"{label}.console").write_text(output)
-        if completed.returncode:
-            raise RuntimeError(f"{label} failed ({completed.returncode}); see {directory}/{label}.console")
+        if returncode:
+            raise RuntimeError(f"{label} failed ({returncode}); see {directory}/{label}.console")
         events = []
         if log.exists():
             events = [json.loads(line) for line in log.read_text().splitlines() if line.startswith("{")]
@@ -61,6 +75,10 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False):
         (directory / f"{label}.sql").write_text(sql)
         if expect_graph is not None:
             assert any('"dbt_markers"' in statement for statement in statements), label
+            if expect_graph == "auto":
+                expect_graph = '"dbt_markers_manifest_status"' not in sql
+                if not expect_graph:
+                    assert "unit-test execution" in sql, label
             if expect_graph:
                 graph = extract_manifest(sql)
                 artifact = json.loads((directory / "target" / "manifest.json").read_text())
@@ -95,7 +113,7 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False):
     invoke("seed", ["seed"], not legacy)
     invoke("run", ["run", "--select", "orders"], not legacy)
     invoke("cached_run", ["run", "--select", "orders"], not legacy)
-    invoke("build", ["build", "--select", "orders"], not legacy)
+    invoke("build", ["build", "--select", "orders"], "auto" if not legacy else False)
     if not legacy:
         invoke("off", ["run", "--select", "orders", "--vars", '{"dbt_markers_manifest_mode": "off"}'], False)
         invoke("required", ["run", "--select", "orders", "--vars", '{"dbt_markers_manifest_mode": "required"}'], True)
@@ -119,8 +137,9 @@ def main():
     parser.add_argument("--package-ref")
     parser.add_argument("--legacy", action="store_true")
     parser.add_argument("--unit-tests", action="store_true")
+    parser.add_argument("--python-api", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(run(args.dbt.resolve(), args.directory.resolve(), args.package_ref, args.legacy, args.unit_tests)))
+    print(json.dumps(run(args.dbt.resolve(), args.directory.resolve(), args.package_ref, args.legacy, args.unit_tests, args.python_api)))
 
 
 if __name__ == "__main__":

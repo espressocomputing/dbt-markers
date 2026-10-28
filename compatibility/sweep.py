@@ -62,7 +62,7 @@ def main():
             if install.returncode == 0:
                 freeze = subprocess.run([args.uv, "--no-config", "pip", "freeze", "--python", str(venv / "bin/python")], capture_output=True, text=True, check=True)
                 (root / f"{version}.freeze.txt").write_text(freeze.stdout)
-                command = [sys.executable, str(Path(__file__).with_name("run.py")), "--dbt", str(venv / "bin/dbt"), "--directory", str(case)]
+                command = [str(venv / "bin/python"), str(Path(__file__).resolve().with_name("run.py")), "--python-api", "--dbt", str(venv / "bin/dbt"), "--directory", str(case)]
                 if tuple(map(int, minor.split("."))) >= (1, 8):
                     command.append("--unit-tests")
                 process = subprocess.run(command, env=env, capture_output=True, text=True, timeout=1200)

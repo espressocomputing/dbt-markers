@@ -9,7 +9,7 @@ from jinja2 import Environment, StrictUndefined
 from examples.manifest_transport import extract_manifest
 
 
-def render(execute=True, model_count=3, mode="auto"):
+def render(execute=True, model_count=3, mode="auto", context_overrides=None):
     def compiler_error(message):
         raise ValueError(message)
 
@@ -46,6 +46,7 @@ def render(execute=True, model_count=3, mode="auto"):
         "var": lambda name, default: mode,
         "log": lambda message, info: None,
     }
+    context.update(context_overrides or {})
     template = Environment(undefined=StrictUndefined, extensions=["jinja2.ext.do"]).from_string(
         (Path(__file__).parents[1] / "macros" / "emit_manifest.sql").read_text()
     )
@@ -83,6 +84,17 @@ class ManifestTest(unittest.TestCase):
 
     def test_disabled_delivery(self):
         self.assertEqual(render(mode="off"), [])
+
+    def test_build_without_unit_test_visibility_falls_back(self):
+        for command in ["build", "test"]:
+            context = {"flags": SimpleNamespace(WHICH=command), "dbt_version": "1.10.23"}
+            with self.subTest(command=command):
+                with self.assertRaisesRegex(ValueError, "unit-test execution"):
+                    extract_manifest("\n".join(render(context_overrides=context)))
+                with self.assertRaisesRegex(ValueError, "unit-test execution"):
+                    render(mode="required", context_overrides=context)
+                context["dbt_version"] = "1.7.20"
+                self.assertEqual(extract_manifest("\n".join(render(context_overrides=context)))["command"], command)
 
     def test_incomplete_or_corrupt_transfer_is_rejected(self):
         queries = render(model_count=250)
