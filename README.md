@@ -173,6 +173,61 @@ warehouse query history. If statements reach Snowflake, they execute ordinary
 `select 1` queries. Hook query failures abort the run; there is no separate receipt
 acknowledgment from Nitro. No model-completion events or run results are sent.
 
+## Compiled planning prototype (unmerged)
+
+`examples/plan.py` writes a `dbt_markers.plan.v1` document under `dbt_plan` for
+Nitro's future configuration interface. It includes the **full compiled SQL text**
+in each model/test node's `compiled_sql`, alongside source text, dependencies,
+relation identity, configuration, and SHA-256 fingerprints. It does not replace
+SQL with hashes or construct the fused megaquery; that remains Nitro's job.
+
+Use an installed dbt Core or v2 CLI with project dependencies already installed:
+
+```sh
+python3 examples/plan.py --dbt /path/to/dbt \
+  --project-dir /path/to/project --profiles-dir /path/to/profiles \
+  --target dev --warehouse-context account/warehouse/role \
+  --select orders --output plan.json
+
+python3 examples/plan.py --dbt /path/to/dbt \
+  --project-dir /path/to/project --profiles-dir /path/to/profiles \
+  --target dev --warehouse-context account/warehouse/role \
+  --select orders --previous plan.json --output next-plan.json
+```
+
+Each invocation runs `dbt ls` for selection and `dbt compile` for the **whole
+project**, with fresh artifacts. Compilation may query the warehouse through
+project macros. The supplied warehouse context must identify the account,
+warehouse, and role without credentials; change it when those change. Pass the
+same `--vars`, `--target`, and `--full-refresh` settings intended for execution.
+Output paths must be new so a failed compile cannot leave an old plan masquerading
+as the new one.
+
+`graph_hash` excludes invocation IDs and selection. `plan_hash` additionally binds
+the selected resource IDs. Per-node fingerprints include exact compiled text,
+source, configuration, relation identity, dependencies, and referenced macro
+bodies. Materialization macros, project hooks, and compilation context are compared
+globally. These comparisons are conservative: formatting/configuration changes
+can invalidate plans even if SQL semantics happen to be equivalent.
+
+`changes` reports added, removed, directly changed, and downstream-affected node
+IDs, plus selection additions/removals. Invalidation traverses both old and new
+edges. Nitro can map those IDs to fused-plan components. `selected_affected` is a
+**planning invalidation set, not an instruction to skip other selected nodes**.
+
+Missing SQL, unit tests without compiled bodies, seeds, snapshots, Python models,
+incremental/custom materializations, and hooks remain unresolved. Unresolved
+ancestors block their selected descendants. `--require-complete` rejects unresolved
+selected plans; it still does not certify the complete warehouse statement stream.
+
+Compiled bodies are available upfront, but materialization DDL/DML and runtime
+branches can differ at execution. The document always sets
+`execution_sql_complete`, `input_state_verified`, and `execution_reuse_authorized`
+to `false`. Nitro must validate runtime SQL, input schema/freshness, and incremental
+state before deciding what to execute or reuse. No Nitro consumer exists yet.
+This prototype writes a JSON file; it does not transmit it through the marker hook
+or automatically launch `dbt run`/`build`. Cloud CLI execution is not verified.
+
 ## Privacy
 
 The comment is stored in your warehouse's query history, and anyone who can
