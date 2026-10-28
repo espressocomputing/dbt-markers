@@ -59,7 +59,7 @@ def main():
         for version in reversed(group_versions):
             case = root / version
             requirements = [f"dbt=={version}"] if args.engine == "v2" else [
-                f"dbt-core=={version}", f"dbt-duckdb=={adapter}", f"dbt-snowflake=={sf}",
+                f"dbt-core=={version}", f"dbt-duckdb~={adapter_minor}.0", f"dbt-snowflake~={minor}.0",
             ]
             install = subprocess.run([
                 args.uv, "--no-config", "pip", "install", "--python", str(venv / "bin/python"),
@@ -70,6 +70,9 @@ def main():
             if install.returncode == 0:
                 freeze = subprocess.run([args.uv, "--no-config", "pip", "freeze", "--python", str(venv / "bin/python")], capture_output=True, text=True, check=True)
                 (root / f"{version}.freeze.txt").write_text(freeze.stdout)
+                installed = dict(line.split("==", 1) for line in freeze.stdout.splitlines() if "==" in line)
+                result["adapter"] = installed.get("dbt-duckdb", "builtin")
+                result["snowflake_adapter"] = installed.get("dbt-snowflake", "builtin")
                 command = [str(venv / "bin/python") if args.engine == "core" else sys.executable,
                            str(Path(__file__).resolve().with_name("run.py")), "--dbt", str(venv / "bin/dbt"), "--directory", str(case)]
                 if args.engine == "core":
