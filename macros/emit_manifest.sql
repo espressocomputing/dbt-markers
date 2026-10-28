@@ -21,6 +21,17 @@
                 {%- do nodes.update({id: record}) -%}
             {%- endfor -%}
         {%- endfor -%}
+        {%- set referenced = selected_resources | list -%}
+        {%- for node in nodes.values() -%}
+            {%- do referenced.extend(node.depends_on) -%}
+        {%- endfor -%}
+        {%- set missing = [] -%}
+        {%- for id in referenced if id not in nodes and id not in missing -%}
+            {%- do missing.append(id) -%}
+        {%- endfor -%}
+        {%- if missing -%}
+            {{ exceptions.raise_compiler_error("dbt graph does not expose required resources: " ~ missing | join(", ")) }}
+        {%- endif -%}
         {%- set payload = tojson({
             "schema": "dbt_markers.graph.v1",
             "invocation_id": invocation_id,

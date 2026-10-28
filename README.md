@@ -99,6 +99,8 @@ This is a **graph projection, not the full `manifest.json` artifact**. It omits
 SQL, macros, docs, arbitrary config/meta, and disabled resources. Resources not
 exposed by a dbt engine's `graph` context cannot be exported (for example, Core
 1.10 does not expose the manifest's separate `unit_tests` collection there).
+If a selected node or dependency is missing from that context, the hook fails
+before sending instead of silently publishing an incomplete graph.
 The new hook's Core/Fusion lifecycle compatibility still needs runtime validation;
 the existing query-comment macro is unchanged.
 

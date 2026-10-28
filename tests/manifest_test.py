@@ -10,6 +10,9 @@ from examples.manifest_transport import extract_manifest
 
 
 def render(execute=True, model_count=3):
+    def compiler_error(message):
+        raise ValueError(message)
+
     source_id = "source.demo.raw.orders"
     nodes = {}
     for index in range(model_count):
@@ -39,6 +42,7 @@ def render(execute=True, model_count=3):
         "local_md5": lambda text: hashlib.md5(text.encode()).hexdigest(),
         "tojson": json.dumps,
         "run_query": queries.append,
+        "exceptions": SimpleNamespace(raise_compiler_error=compiler_error),
     }
     template = Environment(undefined=StrictUndefined, extensions=["jinja2.ext.do"]).from_string(
         (Path(__file__).parents[1] / "macros" / "emit_manifest.sql").read_text()
@@ -68,6 +72,10 @@ class ManifestTest(unittest.TestCase):
 
     def test_parse_sends_nothing(self):
         self.assertEqual(render(execute=False), [])
+
+    def test_missing_selected_resource_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "does not expose required resources"):
+            render(model_count=1)
 
     def test_incomplete_or_corrupt_transfer_is_rejected(self):
         queries = render(model_count=250)
