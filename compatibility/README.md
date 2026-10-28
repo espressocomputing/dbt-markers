@@ -77,3 +77,12 @@ Core 1.6.0 used the earlier sweep environment with protobuf 4.25.9. A fresh
 installation resolved protobuf 7.36.2 and failed during `dbt deps` with maximum
 recursion depth exceeded, before the graph hook ran. Preserve compatible
 transitive dependencies when running this older dbt release.
+
+## Query text verification
+
+Revision `ff22794849549b8d98f69302f34858c733df9d68` passed on Core 1.6.0,
+1.10.23, 1.12.6, and v2 2.0.9, plus eight macro/decoder tests. All 116 model/test
+nodes in each canary graph carried raw source matching the manifest, including
+singular and generic tests. None carried nonempty compiled code at `on-run-start`.
+Each graph still used one metadata query. Core 1.6 used the compatible environment
+described above. Cloud was not rerun for the query-text change.

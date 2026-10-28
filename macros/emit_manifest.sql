@@ -24,7 +24,7 @@
                     "resource_type": node.resource_type,
                     "depends_on": node.get("depends_on", {}).get("nodes", []) | sort,
                 } -%}
-                {%- for field in ["name", "package_name", "database", "schema", "alias", "identifier", "relation_name"] -%}
+                {%- for field in ["name", "package_name", "database", "schema", "alias", "identifier", "relation_name", "language", "raw_code", "compiled_code"] -%}
                     {%- if node.get(field) is not none -%}
                         {%- do record.update({field: node[field]}) -%}
                     {%- endif -%}
