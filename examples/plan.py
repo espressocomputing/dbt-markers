@@ -108,6 +108,8 @@ def make_plan(manifest, results, selected, context, previous=None):
         "invocation_id": metadata["invocation_id"],
         "sql_scope": "compiled_node_body",
         "execution_sql_complete": False,
+        "input_state_verified": False,
+        "execution_reuse_authorized": False,
         "execution_policy": "Never skip work from plan equality alone; validate inputs and runtime SQL separately.",
         "context": context,
         "context_hash": context_hash,
@@ -124,7 +126,8 @@ def make_plan(manifest, results, selected, context, previous=None):
                 required.add(parent)
                 pending.append(parent)
     plan["unresolved_nodes"] = {key: nodes[key]["unresolved"] for key in sorted(required) if nodes[key]["unresolved"]}
-    plan["compiled_selection_complete"] = not plan["unresolved_nodes"]
+    plan["unresolved_context"] = ["project_hooks"] if context["project_hooks"] else []
+    plan["compiled_selection_complete"] = not (plan["unresolved_nodes"] or plan["unresolved_context"])
     if previous is not None:
         if previous["schema"] != SCHEMA:
             raise ValueError("Unsupported previous plan schema")
@@ -150,6 +153,8 @@ def make_plan(manifest, results, selected, context, previous=None):
     plan["changes"] = {
         "context_changed": context_changed,
         "selection_changed": previous is None or previous["selected_resources"] != selected,
+        "selection_added": sorted(set(selected) - set(previous["selected_resources"] if previous else [])),
+        "selection_removed": sorted(set(previous["selected_resources"] if previous else []) - set(selected)),
         "added": sorted(added), "removed": sorted(removed), "changed": sorted(changed),
         "affected": sorted(affected), "selected_affected": sorted(affected & set(selected)),
         "unchanged": sorted(nodes.keys() - affected),
@@ -198,7 +203,7 @@ def compile_plan(args):
                    "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context}
         plan = make_plan(manifest, results, selected, context, previous)
         if args.require_complete and not plan["compiled_selection_complete"]:
-            raise ValueError("Selected plan has unresolved nodes: " + json.dumps(plan["unresolved_nodes"]))
+            raise ValueError("Selected plan has unresolved nodes/context: " + json.dumps({"nodes": plan["unresolved_nodes"], "context": plan["unresolved_context"]}))
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({"dbt_plan": plan}, indent=2) + "\n")
         return plan

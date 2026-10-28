@@ -127,6 +127,36 @@ def verify(dbt, root, smoke=False):
     assert "runtime_hooks" in changed["unresolved_nodes"][b]
     (project / "models/b.sql").write_text(files["models/b.sql"])
 
+    (project / "dbt_project.yml").write_text(files["dbt_project.yml"] + "on-run-start: ['select 1']\n")
+    changed = plan("project_hook_unresolved", "baseline")
+    assert changed["unresolved_context"] == ["project_hooks"]
+    assert not changed["compiled_selection_complete"]
+    (project / "dbt_project.yml").write_text(files["dbt_project.yml"])
+
+    (project / "models/units.yml").write_text("unit_tests:\n  - name: c_unit\n    model: c\n    given:\n      - input: ref('b')\n        rows: [{id: 1}]\n    expect:\n      rows: [{id: 1}]\n")
+    changed = plan("unit_test_unresolved", "baseline")
+    assert any(key.startswith("unit_test.") for key in changed["changes"]["selected_unresolved"])
+    (project / "models/units.yml").unlink()
+
+    try:
+        plan("empty_selection", "baseline", select="no_such_node")
+    except ValueError as error:
+        assert "no executable resources" in str(error)
+    else:
+        raise AssertionError("Empty selection accepted")
+    assert not (root / "empty_selection.json").exists()
+
+    corrupted = json.loads((root / "baseline.json").read_text())
+    corrupted["dbt_plan"]["nodes"][a]["compiled_sql"] = "select 999 as id"
+    (root / "corrupted.json").write_text(json.dumps(corrupted))
+    try:
+        plan("corruption_rejected", "corrupted")
+    except ValueError as error:
+        assert "fingerprint mismatch" in str(error)
+    else:
+        raise AssertionError("Corrupt previous plan accepted")
+    assert not (root / "corruption_rejected.json").exists()
+
     changed = plan("warehouse_identity_edit", "baseline", warehouse_context="different-account/role")
     assert changed["changes"]["context_changed"] and c in changed["changes"]["affected"]
 
@@ -135,6 +165,7 @@ def verify(dbt, root, smoke=False):
     changed = plan("input_data_edit", "baseline")
     assert c in changed["changes"]["unchanged"]
     assert not changed["execution_sql_complete"]
+    assert not changed["input_state_verified"] and not changed["execution_reuse_authorized"]
     return records
 
 
