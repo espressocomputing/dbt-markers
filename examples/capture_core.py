@@ -61,7 +61,7 @@ def capture(request):
         return tuple(part.name for part in normalize_identifiers(table.copy(), dialect=adapter_type).parts)
 
     def record(sql, fetch=False, bindings=None):
-        statement = {"node_id": identity(), "sql": sql, "fetch": fetch, "bindings": bindings}
+        statement = {"node_id": identity(), "sql": sql, "fetch": fetch, "bindings": bindings, "binding_types": [type(value).__name__ for value in bindings] if bindings is not None else None}
         try:
             parsed = sqlglot.parse(sql, read=adapter_type, error_level=sqlglot.ErrorLevel.RAISE)
         except SqlglotError:
@@ -76,6 +76,8 @@ def capture(request):
         return statement
 
     def execute(self, sql, auto_begin=False, fetch=False, limit=None):
+        if auto_begin and not self.get_thread_connection().transaction_open:
+            self.begin()
         statement = record(sql, fetch)
         if fetch:
             supplied = state.get("query_results", {}).get(sql.strip())
@@ -91,6 +93,8 @@ def capture(request):
         return UnknownResponse(_message=""), empty_table()
 
     def add_query(self, sql, auto_begin=True, bindings=None, abridge_sql_log=False, **kwargs):
+        if auto_begin and not self.get_thread_connection().transaction_open:
+            self.begin()
         record(sql, bindings=bindings)
         return self.get_thread_connection(), UnknownCursor()
 
@@ -171,6 +175,8 @@ def capture(request):
         "adapter_type": adapter_type,
         "command": request["command"],
         "offline": True,
+        "submission_boundary": "dbt_adapter",
+        "query_comments_omitted": True,
         "assumptions": ["supplied metadata is current", "captured statements succeed if executed"],
         "metadata_queries_replaced_by_snapshot": True,
         "generation_completed": result.success and not blockers,
