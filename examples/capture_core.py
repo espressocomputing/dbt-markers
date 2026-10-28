@@ -14,6 +14,7 @@ def capture(request):
     from sqlglot import exp
     from sqlglot.errors import SqlglotError
     from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
+    from sqlglot.optimizer.qualify import qualify
     from dbt.cli.main import dbtRunner
     from dbt.adapters.factory import get_adapter_class_by_name, load_plugin
     from dbt.adapters.contracts.connection import AdapterResponse
@@ -75,6 +76,27 @@ def capture(request):
                         generated_relations[relation_key(table)] = hashlib.sha256(sql.encode()).hexdigest()
         return statement
 
+    def zero_row_projection(sql):
+        try:
+            query = sqlglot.parse_one(sql, read=adapter_type)
+            if not isinstance(query, exp.Select):
+                return None
+            where, limit = query.args.get("where"), query.args.get("limit")
+            if not ((where and isinstance(where.this, exp.Boolean) and where.this.this is False)
+                    or (limit and isinstance(limit.expression, exp.Literal) and limit.expression.this == "0")):
+                return None
+            schema = {database: {name: {table: {column["name"]: column["data_type"] for column in data.get("columns", [])}
+                                      for table, data in values["relations"].items()}
+                                 for name, values in details["schemas"].items()}
+                      for database, details in state["databases"].items()}
+            query = qualify(query, dialect=adapter_type, schema=schema)
+            names = query.named_selects
+            if not names or any(not name or name == "*" for name in names):
+                return None
+            return {"columns": names, "rows": []}
+        except SqlglotError:
+            return None
+
     def execute(self, sql, auto_begin=False, fetch=False, limit=None):
         if auto_begin and not self.get_thread_connection().transaction_open:
             self.begin()
@@ -86,10 +108,14 @@ def capture(request):
                 supplied = {"columns": [constant[1]], "rows": [[int(constant[1])]]}
                 statement["result_source"] = "constant_expression"
             elif supplied is None:
-                blocked("query_result_required")
+                supplied = zero_row_projection(sql)
+                if supplied is None:
+                    blocked("query_result_required")
+                statement["result_source"] = "zero_row_projection"
             else:
                 statement["result_source"] = "supplied_snapshot"
-            return UnknownResponse(_message=""), table_from_data_flat(supplied["rows"], supplied["columns"])
+            data = [dict(zip(supplied["columns"], row, strict=True)) for row in supplied["rows"]]
+            return UnknownResponse(_message=""), table_from_data_flat(data, supplied["columns"])
         return UnknownResponse(_message=""), empty_table()
 
     def add_query(self, sql, auto_begin=True, bindings=None, abridge_sql_log=False, **kwargs):

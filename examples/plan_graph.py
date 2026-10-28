@@ -95,7 +95,7 @@ def add_lineage(nodes, adapter, database=None, schema=None):
         node["declared_depends_on"] = list(node["depends_on"])
         node["sql_depends_on"] = []
         node["input_relations"] = []
-        texts = ([node["compiled_sql"]] if node["compiled_sql"] else []) + [statement["sql"] for statement in node.get("generated_statements", [])]
+        texts = ([node["compiled_sql"]] if node["compiled_sql"] else []) + [statement["sql"] for statement in node.get("generated_statements", []) if statement.get("result_source") not in {"supplied_snapshot", "zero_row_projection"}]
         if not texts:
             continue
         reads, issues = physical_reads(";\n".join(texts), dialect, database, schema)
