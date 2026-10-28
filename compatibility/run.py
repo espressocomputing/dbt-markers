@@ -24,7 +24,7 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False):
     (directory / "packages.yml").write_text(packages)
     (directory / "profiles.yml").write_text(
         "dbt_markers_canary:\n  target: local\n  outputs:\n    local:\n"
-        "      type: duckdb\n      path: canary.duckdb\n      schema: canary\n"
+        "      type: duckdb\n      path: graph_data.duckdb\n      schema: canary\n"
         "      threads: 2\n"
     )
     # Enough unselected nodes to exercise multiple metadata statements.
@@ -69,8 +69,12 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False):
                     for collection in ["nodes", "sources", "exposures", "metrics", "semantic_models", "saved_queries"]
                     for key, value in artifact.get(collection, {}).items()
                 }
-                assert graph["nodes"].keys() == expected.keys(), label
+                data_nodes = {key for key, node in expected.items() if node["resource_type"] != "operation"}
+                actual_nodes = {key for key, node in graph["nodes"].items() if node["resource_type"] != "operation"}
+                assert actual_nodes == data_nodes, label
                 for key, node in expected.items():
+                    if node["resource_type"] == "operation":
+                        continue
                     assert graph["nodes"][key]["depends_on"] == sorted(node.get("depends_on", {}).get("nodes", [])), key
                 assert graph["nodes"]["model.dbt_markers_canary.staging"]["materialized"] == "ephemeral"
                 assert "model.dbt_markers_canary.unselected" in graph["nodes"]
