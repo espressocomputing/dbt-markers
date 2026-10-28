@@ -86,3 +86,19 @@ nodes in each canary graph carried raw source matching the manifest, including
 singular and generic tests. None carried nonempty compiled code at `on-run-start`.
 Each graph still used one metadata query. Core 1.6 used the compatible environment
 described above. Cloud was not rerun for the query-text change.
+
+## Compiled planner prototype
+
+Run `python3 compatibility/planning.py --dbt /path/to/dbt --directory /new/path`.
+The suite uses real dbt compilation and warehouse fixtures, without mocking dbt.
+Core 1.12.6 passed 17 plan scenarios: stable repeat, model/macro/variable edits,
+selection changes, ephemeral expansion, relation changes, test edits/removal,
+rewiring/deletion, incremental and hook handling, unit-test handling, warehouse
+identity changes, and input-data changes. Strict unresolved plans, empty selection,
+and corrupted prior plans were rejected without writing output. Core 1.6.0 (with
+the previously documented compatible dependencies) and v2 2.0.9 passed baseline
+and repeat smoke checks. The eight existing marker/decoder tests also passed.
+
+The plans contain full compiled model/test query bodies as well as fingerprints.
+These checks do not establish exact materialization SQL, input freshness, Cloud
+compatibility, or a working Nitro integration. The planner remains a draft.
