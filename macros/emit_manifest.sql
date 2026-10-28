@@ -1,9 +1,17 @@
 {% macro emit_manifest() -%}
-    {%- if execute -%}
-        {%- if selected_resources is not defined -%}
-            {{ exceptions.raise_compiler_error("Use dbt_markers.emit_manifest() in on-run-start") }}
+    {%- set mode = var("dbt_markers_manifest_mode", "auto") -%}
+    {%- if mode not in ["auto", "required", "off"] -%}
+        {{ exceptions.raise_compiler_error("dbt_markers_manifest_mode must be auto, required, or off") }}
+    {%- endif -%}
+    {%- if execute and mode != "off" -%}
+        {%- set state = namespace(reason="") -%}
+        {%- if graph is not defined or graph is not mapping -%}
+            {%- set state.reason = "runtime graph unavailable" -%}
+        {%- elif selected_resources is not defined -%}
+            {%- set state.reason = "selected_resources unavailable; use on-run-start" -%}
         {%- endif -%}
         {%- set nodes = {} -%}
+        {%- if not state.reason -%}
         {%- for collection in ["nodes", "sources", "exposures", "metrics", "semantic_models", "saved_queries", "unit_tests"] -%}
             {%- for id, node in graph.get(collection, {}).items() | sort -%}
                 {%- set record = {
@@ -30,8 +38,23 @@
             {%- do missing.append(id) -%}
         {%- endfor -%}
         {%- if missing -%}
-            {{ exceptions.raise_compiler_error("dbt graph does not expose required resources: " ~ missing | join(", ")) }}
+            {%- set state.reason = "runtime graph omits selected nodes or dependencies: " ~ missing | join(", ") -%}
         {%- endif -%}
+        {%- endif -%}
+        {%- if state.reason -%}
+            {%- if mode == "required" -%}
+                {{ exceptions.raise_compiler_error(state.reason) }}
+            {%- else -%}
+                {%- do log("dbt-markers: graph unavailable; retaining per-query markers: " ~ state.reason, info=true) -%}
+                {%- set status = tojson({
+                    "dbt_markers_manifest_status": 1,
+                    "invocation_id": invocation_id,
+                    "status": "unavailable",
+                    "reason": state.reason,
+                }) | replace("/*", "\\u002f*") | replace("*/", "*\\/") -%}
+                {%- do run_query("select 1 /* " ~ status ~ " */") -%}
+            {%- endif -%}
+        {%- else -%}
         {%- set payload = tojson({
             "schema": "dbt_markers.graph.v1",
             "invocation_id": invocation_id,
@@ -56,5 +79,6 @@
             }) | replace("/*", "\\u002f*") | replace("*/", "*\\/") -%}
             {%- do run_query("select 1 /* " ~ envelope ~ " */") -%}
         {%- endfor -%}
+        {%- endif -%}
     {%- endif -%}
 {%- endmacro %}

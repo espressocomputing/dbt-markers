@@ -17,6 +17,8 @@ def extract_manifest(sql):
             envelope = json.loads(comment)
         except json.JSONDecodeError:
             continue
+        if isinstance(envelope, dict) and "dbt_markers_manifest_status" in envelope:
+            raise ValueError(f"Manifest unavailable: {envelope['reason']}")
         if not isinstance(envelope, dict) or "dbt_markers_manifest" not in envelope:
             continue
         if envelope["dbt_markers_manifest"] != 1:

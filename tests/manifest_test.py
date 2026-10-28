@@ -9,7 +9,7 @@ from jinja2 import Environment, StrictUndefined
 from examples.manifest_transport import extract_manifest
 
 
-def render(execute=True, model_count=3):
+def render(execute=True, model_count=3, mode="auto"):
     def compiler_error(message):
         raise ValueError(message)
 
@@ -43,6 +43,8 @@ def render(execute=True, model_count=3):
         "tojson": json.dumps,
         "run_query": queries.append,
         "exceptions": SimpleNamespace(raise_compiler_error=compiler_error),
+        "var": lambda name, default: mode,
+        "log": lambda message, info: None,
     }
     template = Environment(undefined=StrictUndefined, extensions=["jinja2.ext.do"]).from_string(
         (Path(__file__).parents[1] / "macros" / "emit_manifest.sql").read_text()
@@ -74,8 +76,13 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(render(execute=False), [])
 
     def test_missing_selected_resource_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "does not expose required resources"):
-            render(model_count=1)
+        with self.assertRaisesRegex(ValueError, "omits selected nodes"):
+            render(model_count=1, mode="required")
+        with self.assertRaisesRegex(ValueError, "Manifest unavailable"):
+            extract_manifest("\n".join(render(model_count=1)))
+
+    def test_disabled_delivery(self):
+        self.assertEqual(render(mode="off"), [])
 
     def test_incomplete_or_corrupt_transfer_is_rejected(self):
         queries = render(model_count=250)
