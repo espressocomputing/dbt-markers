@@ -62,18 +62,21 @@ invocation context, PR id, git SHA and branch), with the name lower-cased.
 The `--vars` value is shown as `<redacted>` there and is recorded word for
 word in `invocation_vars`.
 
-## Prototype: deliver the graph before model execution
+## Deliver the graph before model execution
 
 Keep the existing `query-comment` configuration and add this hook first in your
 root project's `dbt_project.yml`:
 
 ```yaml
 on-run-start:
-  - "{{ dbt_markers.emit_manifest() }}"
+  - "{{ dbt_markers.emit_manifest() if dbt_markers.emit_manifest is defined else '' }}"
 ```
 
-Use the prototype branch `kuza/manifest-comments` in `packages.yml` and rerun
-`dbt deps`. This is opt-in; installing the package alone sends no graph.
+Pin a full commit containing `emit_manifest` in `packages.yml` and rerun
+`dbt deps`. The `v1.0.0` tag predates graph delivery; the guarded hook above lets
+you roll back to it and retain ordinary markers. Short commit hashes are not
+portable across engines; use all 40 characters or a published tag.
+This is opt-in; installing the package alone sends no graph.
 The hook emits one or more `select 1` statements with trailing JSON comments.
 They travel through the configured warehouse connection, so an Espresso proxy
 can receive them without an HTTP endpoint, new credentials, or dbt Cloud API.
@@ -88,7 +91,7 @@ select 1 /* {"dbt_markers_manifest": 1, "invocation_id": "...",
 ```
 
 The payload uses `schema: dbt_markers.graph.v1` and contains invocation, project,
-dbt version, command, target name, `selected_resources`, and a `nodes` map keyed
+dbt version, command, target name, `available_collections`, `selected_resources`, and a `nodes` map keyed
 by unique ID. Each node has its resource type and `depends_on` IDs, plus available
 relation identifiers and materialization. It includes unselected nodes, sources,
 ephemeral nodes, and the other resources exposed by dbt's runtime `graph` context.
@@ -99,10 +102,26 @@ This is a **graph projection, not the full `manifest.json` artifact**. It omits
 SQL, macros, docs, arbitrary config/meta, and disabled resources. Resources not
 exposed by a dbt engine's `graph` context cannot be exported (for example, Core
 1.10 does not expose the manifest's separate `unit_tests` collection there).
-If a selected node or dependency is missing from that context, the hook fails
-before sending instead of silently publishing an incomplete graph.
-The new hook's Core/Fusion lifecycle compatibility still needs runtime validation;
-the existing query-comment macro is unchanged.
+Core 1.8+ also omits unit tests from `selected_resources`, so absence of missing
+references alone cannot establish a complete execution graph for `build`/`test`.
+The hook falls back when the engine cannot expose unit-test definitions for those
+commands. Core 1.6–1.7 have no unit-test feature; v2 exposes that collection.
+Selection reflects the engine: v2 includes ephemeral ancestors that Core omits.
+
+Control delivery with `vars: {dbt_markers_manifest_mode: auto}`:
+
+| Mode | Behavior |
+| --- | --- |
+| `auto` (default) | Send the graph when supported. Otherwise log the reason and send a `dbt_markers_manifest_status: 1` comment with `status: unavailable`. Keep ordinary query markers. |
+| `required` | Fail before model execution if the graph cannot be delivered completely. |
+| `off` | Send no graph or status queries; keep ordinary query markers. |
+
+Fallback never sends a partial graph. It does not catch database errors: failed
+metadata SQL still fails the run. The receiver must not reuse an older invocation's
+graph when the new invocation is unavailable or absent.
+See [compatibility verification](compatibility/README.md) for tested versions,
+packaging, and Cloud evidence. The package requires dbt 1.6 or later; fallback does
+not bypass that installation constraint.
 
 ### Receiver / Nitro configuration demo
 
