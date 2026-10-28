@@ -6,6 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
+from importlib.metadata import version
 from threading import Lock
 from contextvars import ContextVar
 
@@ -275,6 +276,7 @@ def capture(request):
     return {
         "schema": "dbt_markers.execution_capture.v1",
         "adapter_type": adapter_type,
+        "versions": {"dbt_core": version("dbt-core"), "adapter": version("dbt-" + adapter_type), "sqlglot": sqlglot.__version__},
         "command": request["command"],
         "offline": True,
         "submission_boundary": "dbt_adapter",
