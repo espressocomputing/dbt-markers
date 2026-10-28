@@ -1,0 +1,11 @@
+version: 2
+sources:
+  - name: raw
+    schema: "{{ target.schema }}"
+    tables:
+      - name: input
+models:
+  - name: orders
+    columns:
+      - name: id
+        tests: [not_null, unique]
