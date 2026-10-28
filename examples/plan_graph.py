@@ -158,16 +158,21 @@ def execution_edges(nodes, selected, command, project_name):
                         edges.add((parent, unit, "unit_test_setup"))
                     if model in selected:
                         edges.add((unit, model, "unit_test_gate"))
+    boundaries = {}
     for owner in list(selected):
         for phase in ("pre-hook", "post-hook"):
             hooks = sorted((key for key, node in nodes.items() if node.get("hook_owner") == owner and node["hook_phase"] == phase), key=lambda key: nodes[key]["hook_index"])
             selected.update(hooks)
+            if hooks:
+                boundaries.setdefault(owner, [owner, owner])[0 if phase == "pre-hook" else 1] = hooks[0] if phase == "pre-hook" else hooks[-1]
             sequence = [*hooks, owner] if phase == "pre-hook" else [owner, *hooks]
             edges.update((left, right, "hook_order") for left, right in zip(sequence, sequence[1:]))
             if hooks and phase == "pre-hook":
                 edges.update((parent, hooks[0], "hook_order") for parent in nodes[owner]["depends_on"])
             if hooks and phase == "post-hook":
                 edges.update((hooks[-1], child, "hook_order") for child in selected if owner in nodes[child]["depends_on"])
+    edges.update((boundaries.get(left, [left, left])[1], boundaries.get(right, [right, right])[0], kind)
+                 for left, right, kind in list(edges) if kind != "hook_order")
     for phase in ("on-run-start", "on-run-end"):
         hooks = sorted((key for key, node in nodes.items() if phase in node.get("tags", [])), key=lambda key: (nodes[key].get("package_name") == project_name, nodes[key].get("package_name", ""), nodes[key].get("hook_index", 0)))
         edges.update((left, right, "project_hook_order") for left, right in zip(hooks, hooks[1:]))

@@ -64,7 +64,11 @@ def capture(request):
         record(sql, bindings=bindings)
         return self.get_thread_connection(), UnknownCursor()
 
+    def identifier(value):
+        return value[1:-1].replace('""', '"') if value and value.startswith('"') and value.endswith('"') else value
+
     def schema_state(database, schema):
+        database, schema = identifier(database), identifier(schema)
         with lock:
             lookups.append({"node_id": identity(), "database": database, "schema": schema})
         databases = state["databases"]
@@ -73,6 +77,7 @@ def capture(request):
         return databases[database]["schemas"][schema]
 
     def list_schemas(self, database):
+        database = identifier(database)
         if database not in state["databases"]:
             blocked("database_metadata_missing:" + str(database))
         return list(state["databases"][database]["schemas"])
