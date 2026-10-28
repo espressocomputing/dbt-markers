@@ -81,7 +81,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
         if kind == "operation" and not sql:
             reasons.append("hook_requires_runtime_render")
         generated = [statement for statement in capture["statements"] if statement["node_id"] == key] if capture else []
-        generation_complete = captured.get(key, {}).get("status") in {"success", "pass", "warn"} and not any(item["node_id"] == key for item in capture["blockers"]) if capture else False
+        generation_complete = key in capture["materializations_generated"] if capture else False
         if capture:
             if generation_complete:
                 reasons = [reason for reason in reasons if not reason.startswith(("runtime_materialization:", "runtime_hooks", "hook_requires_runtime_render"))]

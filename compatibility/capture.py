@@ -69,13 +69,17 @@ def verify(python, root):
     assert any(statement["bindings"] for statement in result["statements"])
 
     (project / "models/units.yml").write_text("unit_tests:\n  - name: b_unit\n    model: b\n    given:\n      - input: ref('a')\n        format: sql\n        rows: select 1 as id\n    expect:\n      format: sql\n      rows: select 1 as id\n")
+    result = run("unit_missing_projection_metadata", "test", "test_type:unit", incremental)
+    create_sql = next(statement["sql"] for statement in result["statements"] if "temporary table" in statement["sql"])
+    incremental["derived_columns"][hashlib.sha256(create_sql.encode()).hexdigest()] = [{"name": "ID", "data_type": "NUMBER(1,0)"}]
     result = run("unit_query", "test", "test_type:unit", incremental)
     unit_sql = [statement["sql"] for statement in result["statements"] if (statement["node_id"] or "").startswith("unit_test.")]
     assert any("actual_or_expected" in sql for sql in unit_sql), result
-    assert not result["generation_completed"] and any(item["reason"] == "query_result_required" for item in result["blockers"])
+    assert not result["generation_completed"] and any(item["stage"] == "result_validation" for item in result["blockers"])
+    assert "unit_test.capture_canary.b.b_unit" in result["materializations_generated"]
     (project / "models/units.yml").unlink()
 
-    a.write_text("{% if execute %}{% set rows = run_query('select max(id) from DATABASE.SCHEMA.INPUT') %}{% endif %}\nselect 1 as id\n")
+    a.write_text("{% if execute %}{% set rows = run_query('select max(id) from DATABASE.SCHEMA.INPUT') %}{% set value = rows.columns[0].values()[0] %}{% endif %}\nselect 1 as id\n")
     result = run("data_result_blocked", select="a")
     assert not result["generation_completed"]
     assert any(item["reason"] == "query_result_required" for item in result["blockers"])

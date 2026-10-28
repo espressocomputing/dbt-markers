@@ -7,6 +7,7 @@ import os
 import re
 from pathlib import Path
 from threading import Lock
+from contextvars import ContextVar
 
 
 def capture(request):
@@ -16,6 +17,9 @@ def capture(request):
     from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
     from sqlglot.optimizer.qualify import qualify
     from dbt.cli.main import dbtRunner
+    from dbt.clients.jinja import MacroGenerator
+    from dbt.context.providers import ProviderContext
+    from dbt_common.utils import AttrDict
     from dbt.adapters.factory import get_adapter_class_by_name, load_plugin
     from dbt.adapters.contracts.connection import AdapterResponse
     from dbt.exceptions import DbtRuntimeError
@@ -35,6 +39,8 @@ def capture(request):
     manager = adapter.ConnectionManager
     statements, blockers, lookups = [], [], []
     generated_relations = {}
+    materialized, post_hooks_finished = set(), set()
+    phase = ContextVar("capture_sql_phase", default="adapter")
     lock = Lock()
 
     def identity():
@@ -42,7 +48,7 @@ def capture(request):
 
     def blocked(reason):
         with lock:
-            blockers.append({"node_id": identity(), "reason": reason})
+            blockers.append({"node_id": identity(), "reason": reason, "stage": "result_validation" if identity() in materialized and identity() in post_hooks_finished else "sql_generation"})
         raise DbtRuntimeError("Offline capture blocked: " + reason)
 
     class UnknownResponse(AdapterResponse):
@@ -54,6 +60,69 @@ def capture(request):
         def __str__(self):
             blocked("statement_response_required:string")
 
+    class UnknownTable:
+        def __getattr__(self, name):
+            blocked("query_result_required")
+
+        def __getitem__(self, key):
+            blocked("query_result_required")
+
+        def __len__(self):
+            blocked("query_result_required")
+
+        def __iter__(self):
+            blocked("query_result_required")
+
+        def __bool__(self):
+            blocked("query_result_required")
+
+        def __str__(self):
+            blocked("query_result_required")
+
+    original_store_result = ProviderContext.store_result
+
+    def store_result(self, name, response, agate_table=None):
+        if isinstance(agate_table, UnknownTable):
+            self.sql_results[name] = AttrDict(response=response, data=agate_table, table=agate_table)
+            return ""
+        return original_store_result(self, name, response, agate_table)
+
+    contexts = [ProviderContext]
+    while contexts:
+        context = contexts.pop()
+        context._context_members_["store_result"] = store_result
+        contexts.extend(context.__subclasses__())
+
+    original_macro_call = MacroGenerator.__call__
+
+    def macro_call(self, *args, **kwargs):
+        name = self.macro.name
+        current = phase.get()
+        if name.startswith("materialization_"):
+            current = "materialization"
+        elif name == "run_hooks" and args:
+            for kind in ("pre", "post"):
+                if args[0] is self.context.get(kind + "_hooks"):
+                    current = kind + "-hook"
+        token = phase.set(current)
+        try:
+            result = original_macro_call(self, *args, **kwargs)
+            if name.startswith("materialization_"):
+                materialized.add(identity())
+            return result
+        finally:
+            phase.reset(token)
+
+    MacroGenerator.__call__ = macro_call
+    original_post_hook = adapter.post_model_hook
+
+    def post_hook(self, *args, **kwargs):
+        result = original_post_hook(self, *args, **kwargs)
+        post_hooks_finished.add(identity())
+        return result
+
+    adapter.post_model_hook = post_hook
+
     class UnknownCursor:
         def __getattr__(self, name):
             blocked("cursor_result_required:" + name)
@@ -62,7 +131,7 @@ def capture(request):
         return tuple(part.name for part in normalize_identifiers(table.copy(), dialect=adapter_type).parts)
 
     def record(sql, fetch=False, bindings=None):
-        statement = {"node_id": identity(), "sql": sql, "fetch": fetch, "bindings": bindings, "binding_types": [type(value).__name__ for value in bindings] if bindings is not None else None}
+        statement = {"node_id": identity(), "phase": phase.get(), "sql": sql, "fetch": fetch, "bindings": bindings, "binding_types": [type(value).__name__ for value in bindings] if bindings is not None else None}
         try:
             parsed = sqlglot.parse(sql, read=adapter_type, error_level=sqlglot.ErrorLevel.RAISE)
         except SqlglotError:
@@ -114,7 +183,8 @@ def capture(request):
             elif supplied is None:
                 supplied = zero_row_projection(sql)
                 if supplied is None:
-                    blocked("query_result_required")
+                    statement["result_source"] = "unknown"
+                    return UnknownResponse(_message=""), UnknownTable()
                 statement["result_source"] = "zero_row_projection"
             else:
                 statement["result_source"] = "supplied_snapshot"
@@ -212,6 +282,7 @@ def capture(request):
         "assumptions": ["supplied metadata is current", "captured statements succeed if executed"],
         "metadata_queries_replaced_by_snapshot": True,
         "generation_completed": result.success and not blockers,
+        "materializations_generated": sorted(key for key in materialized & post_hooks_finished if key is not None and not any(item["node_id"] == key and item["stage"] == "sql_generation" for item in blockers)),
         "statements": statements,
         "blockers": blockers,
         "metadata_lookups": lookups,
