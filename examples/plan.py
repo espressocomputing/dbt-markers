@@ -6,6 +6,8 @@ import json
 import subprocess
 import sys
 import tempfile
+
+import sqlglot
 from pathlib import Path
 
 
@@ -126,7 +128,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
     if missing:
         raise ValueError("Unresolved dependency IDs: " + ", ".join(sorted(missing)))
     metadata = manifest["metadata"]
-    context = {**context, "project_name": metadata["project_name"], "adapter_type": metadata["adapter_type"],
+    context = {**context, "sqlglot_version": sqlglot.__version__, "project_name": metadata["project_name"], "adapter_type": metadata["adapter_type"],
                "dbt_version": metadata["dbt_version"], "quoting": metadata.get("quoting"),
                "materialization_macros": {key: digest(macro["macro_sql"]) for key, macro in sorted(macros.items()) if macro["name"].startswith("materialization_")},
                "project_hooks": {key: node.get("raw_code") for key, node in resources.items() if node["resource_type"] == "operation"}}

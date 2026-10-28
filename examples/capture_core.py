@@ -78,7 +78,8 @@ def capture(request):
 
     def zero_row_projection(sql):
         try:
-            query = sqlglot.parse_one(sql, read=adapter_type)
+            statements = sqlglot.parse(sql, read=adapter_type)
+            query = statements[0] if len(statements) == 1 else None
             if not isinstance(query, exp.Select):
                 return None
             where, limit = query.args.get("where"), query.args.get("limit")
@@ -89,6 +90,9 @@ def capture(request):
                                       for table, data in values["relations"].items()}
                                  for name, values in details["schemas"].items()}
                       for database, details in state["databases"].items()}
+            if any(not isinstance(projection, (exp.Alias, exp.Column, exp.Star))
+                   for select in query.find_all(exp.Select) for projection in select.expressions):
+                return None
             query = qualify(query, dialect=adapter_type, schema=schema)
             names = query.named_selects
             if not names or any(not name or name == "*" for name in names):
@@ -114,6 +118,7 @@ def capture(request):
                 statement["result_source"] = "zero_row_projection"
             else:
                 statement["result_source"] = "supplied_snapshot"
+                statement["result_kind"] = supplied.get("kind", "data")
             data = [dict(zip(supplied["columns"], row, strict=True)) for row in supplied["rows"]]
             return UnknownResponse(_message=""), table_from_data_flat(data, supplied["columns"])
         return UnknownResponse(_message=""), empty_table()
