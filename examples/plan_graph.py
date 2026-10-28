@@ -31,25 +31,43 @@ def relation_parts(table, dialect, database=None, schema=None):
 
 
 def physical_reads(sql, dialect, database=None, schema=None):
-    reads, issues = set(), set()
+    reads, issues, produced = set(), set(), set()
     try:
         statements = sqlglot.parse(sql, read=dialect, error_level=sqlglot.ErrorLevel.RAISE)
         for statement in statements:
             if statement is None:
                 continue
-            if isinstance(statement, (exp.Insert, exp.Update, exp.Delete, exp.Merge)):
-                issues.add("dml_lineage_requires_state")
             if isinstance(statement, exp.Command):
                 issues.add("opaque_sql_statement")
             if list(statement.find_all(exp.Anonymous)):
                 issues.add("function_body_not_inspected")
+            cte_refs = set()
             for scope in traverse_scope(statement):
-                for _, source in scope.selected_sources.values():
-                    if isinstance(source, exp.Table):
-                        try:
-                            reads.add(relation_parts(source, dialect, database, schema))
-                        except ValueError as error:
-                            issues.add(str(error))
+                for reference, source in scope.selected_sources.values():
+                    if not isinstance(source, exp.Table):
+                        cte_refs.add(id(reference))
+            target = statement.args.get("this")
+            if isinstance(target, exp.Schema):
+                target = target.this
+            write_only = isinstance(statement, (exp.Create, exp.Drop, exp.Alter))
+            root_with = statement.args.get("with_")
+            root_ctes = {cte.alias for cte in root_with.expressions} if root_with else set()
+            for table in statement.find_all(exp.Table):
+                if id(table) in cte_refs or (write_only and table is target):
+                    continue
+                if table is not target and not table.db and table.name in root_ctes and table.find_ancestor(exp.CTE) is None:
+                    continue
+                try:
+                    parts = relation_parts(table, dialect, database, schema)
+                    if parts not in produced:
+                        reads.add(parts)
+                except ValueError as error:
+                    issues.add(str(error))
+            if isinstance(statement, exp.Create) and isinstance(target, exp.Table):
+                try:
+                    produced.add(relation_parts(target, dialect, database, schema))
+                except ValueError as error:
+                    issues.add(str(error))
     except SqlglotError as error:
         issues.add("sql_parse_error:" + type(error).__name__)
     return sorted(reads), sorted(issues)
@@ -85,9 +103,9 @@ def add_lineage(nodes, adapter, database=None, schema=None):
         for parts in reads:
             node["input_relations"].append(list(parts))
             candidates = by_relation.get(parts, [])
-            if key in candidates or node.get("hook_owner") in candidates:
-                node["unresolved"].append("self_relation_read:" + ".".join(parts))
-                continue
+            prior_state = key in candidates or node.get("hook_owner") in candidates
+            if prior_state:
+                candidates = []
             producers = [candidate for candidate in candidates if nodes[candidate]["resource_type"] in {"model", "seed", "snapshot"}]
             declared = [candidate for candidate in candidates if candidate in node["declared_depends_on"]]
             if len(producers) == 1:
@@ -100,9 +118,9 @@ def add_lineage(nodes, adapter, database=None, schema=None):
                 node["unresolved"].append("ambiguous_relation:" + ".".join(parts))
                 continue
             else:
-                parent = "relation." + hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+                parent = "relation." + hashlib.sha256(json.dumps([parts, key if prior_state else None]).encode()).hexdigest()
                 nodes.setdefault(parent, {
-                    "resource_type": "external_relation", "depends_on": [],
+                    "resource_type": "external_relation", "state": "before_node" if prior_state else "external", "depends_on": [],
                     "declared_depends_on": [], "sql_depends_on": [], "input_relations": [],
                     "relation_name": sqlglot.exp.table_(parts[2], db=parts[1], catalog=parts[0], quoted=True).sql(dialect=dialect),
                     "database": parts[0], "schema": parts[1], "identifier": parts[2],
