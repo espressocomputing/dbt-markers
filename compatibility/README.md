@@ -62,3 +62,18 @@ The [checked-in results](results.json) record the original chunked transport swe
 They are historical evidence for graph extraction and fallback behavior, not a
 Cloud verification of transport version 2.
 Cloud release tracks can change independently of local Core releases.
+
+## Single-query transport verification
+
+Transport version 2 passed the real dbt canary with Git revision
+`c7376b830f345d3316fda7a486e6c9c5658ebd5c` on Core 1.6.0, 1.10.23,
+1.12.6, and v2 2.0.9. Each graph delivery used exactly one metadata query before
+model SQL; cached parsing, strict/off modes, and unit-test fallback checks passed.
+Eight macro/decoder tests passed, including one statement containing a 6,001-node
+payload larger than 1 MB. The large-payload test renders and decodes locally;
+it does not establish a warehouse POST limit. Cloud was not rerun for version 2.
+
+Core 1.6.0 used the earlier sweep environment with protobuf 4.25.9. A fresh
+installation resolved protobuf 7.36.2 and failed during `dbt deps` with maximum
+recursion depth exceeded, before the graph hook ran. Preserve compatible
+transitive dependencies when running this older dbt release.
