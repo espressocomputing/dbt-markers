@@ -22,7 +22,9 @@ def render(execute=True, model_count=3, mode="auto", context_overrides=None):
             "relation_name": '"DB"."SCHEMA"."a/*b*/雪"',
             "config": {"materialized": "ephemeral" if index == 0 else "table"},
             "depends_on": {"nodes": [source_id if index == 0 else "model.demo.m0"]},
-            "raw_code": "SQL_MUST_NOT_LEAK",
+            "language": "sql",
+            "raw_code": "select * from {{ ref('input') }} where label = '/*雪*/'",
+            "compiled_code": "select * from DB.SCHEMA.input where label = '/*雪*/'",
             "meta": {"private": "META_MUST_NOT_LEAK"},
         }
     graph = {
@@ -70,7 +72,12 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(graph["nodes"]["model.demo.m1"]["depends_on"], ["model.demo.m0"])
         self.assertEqual(graph["nodes"]["model.demo.m0"]["depends_on"], ["source.demo.raw.orders"])
         self.assertEqual(graph["nodes"]["model.demo.m1"]["relation_name"], '"DB"."SCHEMA"."a/*b*/雪"')
-        self.assertNotIn("MUST_NOT_LEAK", sql)
+        self.assertEqual(graph["nodes"]["model.demo.m1"]["raw_code"],
+                         "select * from {{ ref('input') }} where label = '/*雪*/'")
+        self.assertEqual(graph["nodes"]["model.demo.m1"]["compiled_code"],
+                         "select * from DB.SCHEMA.input where label = '/*雪*/'")
+        self.assertEqual(graph["nodes"]["model.demo.m1"]["language"], "sql")
+        self.assertNotIn("META_MUST_NOT_LEAK", sql)
 
     def test_large_graph_uses_one_query(self):
         queries = render(model_count=6000)

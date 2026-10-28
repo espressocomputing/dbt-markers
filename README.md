@@ -52,7 +52,7 @@ significant.
 `node_package_name`, `node_name`, `node_alias`, `node_original_file_path`,
 `node_database`, `node_schema`, `materialized`, `incremental_strategy`,
 `snowflake_warehouse`, `node_ref_names`, `node_depends_on`, `node_checksum`,
-`raw_code_md5` (the code itself is never included), `node_tags`, `node_meta`.
+`raw_code_md5` (per-query markers omit the code), `node_tags`, `node_meta`.
 
 **dbt Cloud runs:** each `DBT_CLOUD_*` run variable that is set (account,
 project, environment id, name and type, job, run, run reason and category,
@@ -95,11 +95,20 @@ dbt version, command, target name, `available_collections`, `selected_resources`
 by unique ID. Each node has its resource type and `depends_on` IDs, plus available
 relation identifiers and materialization. It includes unselected nodes, sources,
 ephemeral nodes, and the other resources exposed by dbt's runtime `graph` context.
+Nodes include `raw_code` (source SQL/Jinja, or Python for Python models),
+`language`, and `compiled_code` when those fields are available. Model and test
+source text is sent even for unselected nodes. Generic test source can be a Jinja
+macro call rather than SQL. At `on-run-start`, dbt has generally not compiled
+models and tests yet, so **compiled SQL is not guaranteed**. These fields are not
+the final materialization statements sent to the warehouse. Nitro must receive
+executed SQL from the normal query stream; this hook cannot provide all rendered
+queries in advance.
+
 Selection is kept separate from the project graph; ephemeral nodes are logical
 dependencies, not necessarily separately executable work.
 
 This is a **graph projection, not the full `manifest.json` artifact**. It omits
-SQL, macros, docs, arbitrary config/meta, and disabled resources. Resources not
+macros, docs, arbitrary config/meta, and disabled resources. Resources not
 exposed by a dbt engine's `graph` context cannot be exported (for example, Core
 1.10 does not expose the manifest's separate `unit_tests` collection there).
 Core 1.8–1.11 also omit unit tests from `selected_resources`, so absence of missing
@@ -171,8 +180,9 @@ read that history can read it. `node_meta`, `invocation_vars` and
 `dbt_cloud_run_reason` are copied exactly as given, so do not put secrets or
 personal data in `meta` or `--vars`; use `env_var()` for secrets instead.
 Opt-in graph comments also reveal project structure and relation names. The graph
-projection does not add model SQL or arbitrary metadata; the existing query-comment
-settings still apply to metadata queries too.
+projection includes model and test source text, which can contain SQL literals.
+It omits arbitrary metadata. Existing query-comment settings still apply to
+metadata queries too.
 
 ## FAQ
 

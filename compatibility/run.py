@@ -94,6 +94,10 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False, python
                     if node["resource_type"] == "operation":
                         continue
                     assert graph["nodes"][key]["depends_on"] == sorted(node.get("depends_on", {}).get("nodes", [])), key
+                for key, node in expected.items():
+                    if node["resource_type"] in ("model", "test"):
+                        assert graph["nodes"][key]["raw_code"] == node["raw_code"], key
+                assert graph["nodes"]["test.dbt_markers_canary.orders_positive"]["raw_code"].startswith("select * from"), label
                 assert graph["nodes"]["model.dbt_markers_canary.staging"]["materialized"] == "ephemeral"
                 assert "model.dbt_markers_canary.unselected" in graph["nodes"]
                 manifest_queries = [i for i, statement in enumerate(statements) if '"dbt_markers_manifest"' in statement]
