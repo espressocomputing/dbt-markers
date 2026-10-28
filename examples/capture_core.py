@@ -1,6 +1,7 @@
 """Capture Core adapter submissions offline, stopping on unknown results."""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -9,6 +10,10 @@ from threading import Lock
 
 
 def capture(request):
+    import sqlglot
+    from sqlglot import exp
+    from sqlglot.errors import SqlglotError
+    from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
     from dbt.cli.main import dbtRunner
     from dbt.adapters.factory import get_adapter_class_by_name, load_plugin
     from dbt.adapters.contracts.connection import AdapterResponse
@@ -28,6 +33,7 @@ def capture(request):
     adapter = get_adapter_class_by_name(adapter_type)
     manager = adapter.ConnectionManager
     statements, blockers, lookups = [], [], []
+    generated_relations = {}
     lock = Lock()
 
     def identity():
@@ -51,10 +57,22 @@ def capture(request):
         def __getattr__(self, name):
             blocked("cursor_result_required:" + name)
 
+    def relation_key(table):
+        return tuple(part.name for part in normalize_identifiers(table.copy(), dialect=adapter_type).parts)
+
     def record(sql, fetch=False, bindings=None):
         statement = {"node_id": identity(), "sql": sql, "fetch": fetch, "bindings": bindings}
+        try:
+            parsed = sqlglot.parse(sql, read=adapter_type, error_level=sqlglot.ErrorLevel.RAISE)
+        except SqlglotError:
+            parsed = []
         with lock:
             statements.append(statement)
+            for expression in parsed:
+                if isinstance(expression, exp.Create):
+                    table = expression.this.this if isinstance(expression.this, exp.Schema) else expression.this
+                    if isinstance(table, exp.Table):
+                        generated_relations[relation_key(table)] = hashlib.sha256(sql.encode()).hexdigest()
         return statement
 
     def execute(self, sql, auto_begin=False, fetch=False, limit=None):
@@ -100,6 +118,13 @@ def capture(request):
                 for name, data in relations.items()]
 
     def columns(self, relation):
+        table = sqlglot.parse_one(str(relation), read=adapter_type, into=exp.Table)
+        generated = generated_relations.get(relation_key(table))
+        if generated:
+            derived = state.get("derived_columns", {}).get(generated)
+            if derived is None:
+                blocked("derived_column_metadata_missing:" + generated)
+            return [self.Column.create(column["name"], column["data_type"]) for column in derived]
         relations = schema_state(relation.database, relation.schema)["relations"]
         if relation.identifier not in relations or "columns" not in relations[relation.identifier]:
             blocked("column_metadata_missing:" + str(relation))

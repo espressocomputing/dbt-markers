@@ -2,6 +2,7 @@
 
 import argparse
 import copy
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -51,6 +52,11 @@ def verify(python, root):
     a.write_text("{{ config(materialized='incremental', incremental_strategy='append') }}\nselect 1 as id\n")
     incremental = copy.deepcopy(state)
     incremental["databases"]["DATABASE"]["schemas"]["SCHEMA"]["relations"]["A"] = {"type": "table", "columns": [{"name": "ID", "data_type": "NUMBER"}]}
+    result = run("incremental_missing_projection_metadata", select="a", snapshot=incremental)
+    assert not result["generation_completed"]
+    assert any(item["reason"].startswith("derived_column_metadata_missing:") for item in result["blockers"])
+    create_sql = next(statement["sql"] for statement in result["statements"] if "temporary view" in statement["sql"])
+    incremental["derived_columns"] = {hashlib.sha256(create_sql.encode()).hexdigest(): [{"name": "ID", "data_type": "NUMBER(1,0)"}]}
     result = run("incremental_append", select="a", snapshot=incremental)
     assert result["generation_completed"], result
     assert any("insert into" in statement["sql"].lower() for statement in result["statements"])
