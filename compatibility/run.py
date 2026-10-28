@@ -102,7 +102,7 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False):
         if unit_tests:
             (directory / "models" / "unit_tests.yml").write_text(
                 "unit_tests:\n  - name: orders_fixture\n    model: orders\n"
-                "    given:\n      - input: ref('staging')\n        rows: [{id: 1}]\n"
+                "    given:\n      - input: ref('staging')\n        format: sql\n        rows: select 1 as id\n"
                 "    expect:\n      rows: [{id: 1}]\n"
             )
             sql = invoke("unit_build", ["build", "--select", "orders"])
