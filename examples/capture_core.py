@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from threading import Lock
 
@@ -60,9 +61,14 @@ def capture(request):
         statement = record(sql, fetch)
         if fetch:
             supplied = state.get("query_results", {}).get(sql.strip())
-            if supplied is None:
+            constant = re.fullmatch(r"\s*select\s+([0-9]+)\s*(?:/\*[\s\S]*\*/)?\s*;?\s*", sql, re.IGNORECASE)
+            if supplied is None and constant:
+                supplied = {"columns": [constant[1]], "rows": [[int(constant[1])]]}
+                statement["result_source"] = "constant_expression"
+            elif supplied is None:
                 blocked("query_result_required")
-            statement["result_source"] = "supplied_snapshot"
+            else:
+                statement["result_source"] = "supplied_snapshot"
             return UnknownResponse(_message=""), table_from_data_flat(supplied["rows"], supplied["columns"])
         return UnknownResponse(_message=""), empty_table()
 
@@ -104,6 +110,13 @@ def capture(request):
 
     # Response values are never supplied to project macros. Only dbt's reporting
     # boundary receives a success placeholder after generation has finished.
+    original_execute = run_task.ModelRunner.execute
+
+    def execute_model(self, model, manifest):
+        if model.language != "sql":
+            blocked("non_sql_model_capture_unsupported")
+        return original_execute(self, model, manifest)
+
     original_result = run_task.ModelRunner._build_run_model_result
 
     def model_result(self, model, context, *args, **kwargs):
@@ -124,6 +137,7 @@ def capture(request):
     adapter.list_relations_without_caching = list_relations
     adapter.get_columns_in_relation = columns
     adapter.check_schema_exists = lambda self, database, schema: identifier(schema) in list_schemas(self, database)
+    run_task.ModelRunner.execute = execute_model
     run_task.ModelRunner._build_run_model_result = model_result
     run_task.get_execution_status = hook_status
     result = dbtRunner().invoke(request["dbt_args"])
