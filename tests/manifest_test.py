@@ -58,9 +58,8 @@ def render(execute=True, model_count=3, mode="auto", context_overrides=None):
 class ManifestTest(unittest.TestCase):
     def test_macro_to_config(self):
         queries = render(model_count=250)
-        self.assertGreater(len(queries), 1)
+        self.assertEqual(len(queries), 1)
         self.assertTrue(all(query.startswith("select 1 /* ") for query in queries))
-        self.assertTrue(all(len(query.encode()) < 40000 for query in queries))
         self.assertTrue(all(query.count("/*") == query.count("*/") == 1 for query in queries))
         sql = "\n".join(reversed(queries)) + "\n" + queries[0]
         sql += '\nselect 2 /* {"dbt_markers": "1.0.0"} */'
@@ -72,6 +71,12 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(graph["nodes"]["model.demo.m0"]["depends_on"], ["source.demo.raw.orders"])
         self.assertEqual(graph["nodes"]["model.demo.m1"]["relation_name"], '"DB"."SCHEMA"."a/*b*/雪"')
         self.assertNotIn("MUST_NOT_LEAK", sql)
+
+    def test_large_graph_uses_one_query(self):
+        queries = render(model_count=6000)
+        self.assertEqual(len(queries), 1)
+        self.assertGreater(len(queries[0].encode()), 1024 * 1024)
+        self.assertEqual(len(extract_manifest(queries[0])["nodes"]), 6001)
 
     def test_parse_sends_nothing(self):
         self.assertEqual(render(execute=False), [])

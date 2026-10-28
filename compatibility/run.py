@@ -97,10 +97,11 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False, python
                 assert graph["nodes"]["model.dbt_markers_canary.staging"]["materialized"] == "ephemeral"
                 assert "model.dbt_markers_canary.unselected" in graph["nodes"]
                 manifest_queries = [i for i, statement in enumerate(statements) if '"dbt_markers_manifest"' in statement]
+                assert len(manifest_queries) == 1, label
                 model_queries = [i for i, statement in enumerate(statements) if '"node_unique_id": "model.dbt_markers_canary.orders"' in statement]
                 if model_queries:
                     assert max(manifest_queries) < min(model_queries), label
-                results[label] = {"nodes": len(graph["nodes"]), "chunks": len(manifest_queries), "selected": graph["selected_resources"]}
+                results[label] = {"nodes": len(graph["nodes"]), "metadata_queries": len(manifest_queries), "selected": graph["selected_resources"]}
             else:
                 assert '"dbt_markers_manifest"' not in sql, label
                 results[label] = "markers_only"

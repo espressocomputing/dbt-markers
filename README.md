@@ -77,17 +77,17 @@ Pin a full commit containing `emit_manifest` in `packages.yml` and rerun
 you roll back to it and retain ordinary markers. Short commit hashes are not
 portable across engines; use all 40 characters or a published tag.
 This is opt-in; installing the package alone sends no graph.
-The hook emits one or more `select 1` statements with trailing JSON comments.
-They travel through the configured warehouse connection, so an Espresso proxy
-can receive them without an HTTP endpoint, new credentials, or dbt Cloud API.
-These precede model execution, **not necessarily all SQL**: connection setup,
+The hook emits one `select 1` statement containing the complete graph comment.
+It travels through the configured warehouse connection, so an Espresso proxy
+can receive it without an HTTP endpoint, new credentials, or dbt Cloud API.
+This precedes model execution, **not necessarily all SQL**: connection setup,
 schema introspection, and earlier hooks may already have run. There is no shared
 "first query" flag or graph attached to every model query.
 
 ```sql
-select 1 /* {"dbt_markers_manifest": 1, "invocation_id": "...",
-  "manifest_id": "<md5 of payload>", "chunk_index": 0, "chunk_count": 1,
-  "data": "<JSON payload fragment>"} */
+select 1 /* {"dbt_markers_manifest": 2, "invocation_id": "...",
+  "manifest_id": "<md5 of payload>",
+  "data": "<complete JSON payload>"} */
 ```
 
 The payload uses `schema: dbt_markers.graph.v1` and contains invocation, project,
@@ -149,15 +149,16 @@ PY
 python3 examples/manifest_transport.py captured.sql > nitro-graph.json
 ```
 
-Chunks carry at most 16,000 payload characters, numbered from zero. Concatenate
-decoded `data` fields in index order and verify the UTF-8 payload's MD5 against
-`manifest_id` before decoding the graph. MD5 detects transfer errors; it is not
-authentication. The example rejects incomplete transfers, conflicting duplicates,
-mixed invocations, and unresolved node references. Identical retries are accepted.
+Transport version 2 sends the complete JSON payload in `data`, without chunking
+or an application-level size cap. Verify its UTF-8 MD5 against `manifest_id`
+before decoding the graph. MD5 detects transfer errors; it is not authentication.
+The example rejects corrupt payloads, conflicting duplicates, mixed invocations,
+and unresolved node references. Identical retries are accepted. The earlier
+chunked version 1 is not accepted by this decoder.
 
-A production receiver must key assembly by authenticated customer plus invocation
-and manifest IDs, bound memory and lifetime, and install configuration only after
-the entire graph validates. It should recognize these as metadata statements,
+A production receiver must associate configuration with the authenticated customer
+and invocation, and install it only after the entire graph validates. Read the
+complete comment directly from the request. Recognize the statement as metadata,
 not workload queries. Use the proxy request stream rather than delayed/truncated
 warehouse query history. If statements reach Snowflake, they execute ordinary
 `select 1` queries. Hook query failures abort the run; there is no separate receipt

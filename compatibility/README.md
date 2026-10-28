@@ -6,7 +6,7 @@ releases, not prereleases or every possible Python/adapter combination.
 `run.py` installs the package into a disposable project and checks parsing,
 seeding, model execution, cached parsing, builds, strict mode, disabled delivery,
 and unit tests where available. It compares decoded comments with the emitted
-manifest, includes enough unselected nodes to force chunking, and verifies that
+manifest, includes unselected nodes beyond the former 16 KB chunk size, and verifies that
 metadata statements precede selected model SQL. Core uses its real `dbtRunner`
 entry point sequentially within one process; v2 uses its native CLI. Warehouse
 execution in the local sweep uses DuckDB. Snowflake adapters are also installed
@@ -44,7 +44,7 @@ support relative local packages, so Cloud tests use a pinned Git dependency.
   excludes hook-operation nodes that Core includes. Consumers should use resource
   types instead of assuming every node corresponds to a warehouse query.
 - All modes retain the existing per-query marker format. Graph delivery runs once
-  per invocation, as one or more separate metadata queries.
+  per invocation, as one separate metadata query.
 - A missing graph or an explicit unavailable status is a per-query-only fallback,
   never permission to reuse a previous invocation's configuration.
 
@@ -58,5 +58,22 @@ are not executed. It uses a dedicated transient database and schema.
 
 Cloud verification must inspect remote run status and artifacts, not just the
 CLI exit code: the Cloud CLI can return zero after a remote dbt operation fails.
-The [checked-in results](results.json) record tested versions and Cloud outcomes.
+The [checked-in results](results.json) record the original chunked transport sweep.
+They are historical evidence for graph extraction and fallback behavior, not a
+Cloud verification of transport version 2.
 Cloud release tracks can change independently of local Core releases.
+
+## Single-query transport verification
+
+Transport version 2 passed the real dbt canary with Git revision
+`c7376b830f345d3316fda7a486e6c9c5658ebd5c` on Core 1.6.0, 1.10.23,
+1.12.6, and v2 2.0.9. Each graph delivery used exactly one metadata query before
+model SQL; cached parsing, strict/off modes, and unit-test fallback checks passed.
+Eight macro/decoder tests passed, including one statement containing a 6,001-node
+payload larger than 1 MB. The large-payload test renders and decodes locally;
+it does not establish a warehouse POST limit. Cloud was not rerun for version 2.
+
+Core 1.6.0 used the earlier sweep environment with protobuf 4.25.9. A fresh
+installation resolved protobuf 7.36.2 and failed during `dbt deps` with maximum
+recursion depth exceeded, before the graph hook ran. Preserve compatible
+transitive dependencies when running this older dbt release.
