@@ -96,6 +96,17 @@ class ManifestTest(unittest.TestCase):
                 context["dbt_version"] = "1.7.20"
                 self.assertEqual(extract_manifest("\n".join(render(context_overrides=context)))["command"], command)
 
+    def test_core_unit_definitions_do_not_establish_unit_selection(self):
+        context = {
+            "flags": SimpleNamespace(WHICH="build"),
+            "dbt_version": "1.12.6",
+            "graph": {"unit_tests": {"unit_test.demo.check": {}}},
+        }
+        with self.assertRaisesRegex(ValueError, "unit-test execution"):
+            extract_manifest("\n".join(render(context_overrides=context)))
+        with self.assertRaisesRegex(ValueError, "unit-test execution"):
+            render(mode="required", context_overrides=context)
+
     def test_incomplete_or_corrupt_transfer_is_rejected(self):
         queries = render(model_count=250)
         invalid = [

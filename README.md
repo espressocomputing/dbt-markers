@@ -105,7 +105,9 @@ exposed by a dbt engine's `graph` context cannot be exported (for example, Core
 Core 1.8–1.11 also omit unit tests from `selected_resources`, so absence of missing
 references alone cannot establish a complete execution graph for `build`/`test`.
 The hook falls back when the engine cannot expose unit-test definitions for those
-commands. Core 1.6–1.7 have no unit-test feature; Core 1.12 and v2 expose that collection.
+commands. Core 1.6–1.7 have no unit-test feature. Core 1.12 exposes definitions but
+omits selected unit-test IDs, so projects with unit tests also fall back for
+`build`/`test`. v2 exposes both definitions and selection.
 Selection reflects the engine: v2 includes ephemeral ancestors that Core omits.
 
 Control delivery with `vars: {dbt_markers_manifest_mode: auto}`:

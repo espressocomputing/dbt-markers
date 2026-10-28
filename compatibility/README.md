@@ -38,7 +38,8 @@ support relative local packages, so Cloud tests use a pinned Git dependency.
   runtime graph. `run` can send its graph, but `build`/`test` conservatively fall
   back in `auto` mode and fail in `required` mode, even if the project has no unit
   tests. This avoids claiming that missing definitions are known not to exist.
-- Core 1.12 exposes unit tests and can send build/test graphs.
+- Core 1.12 sends build/test graphs when the unit-test collection is empty;
+  projects with unit tests fall back because selection omits their IDs.
 - v2 exposes unit tests and includes ephemeral ancestors in selection. Its graph
   excludes hook-operation nodes that Core includes. Consumers should use resource
   types instead of assuming every node corresponds to a warehouse query.

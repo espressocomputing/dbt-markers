@@ -12,6 +12,9 @@
         {%- elif flags.WHICH in ["build", "test"] and "unit_tests" not in graph
               and not (dbt_version.split('.')[0] == '1' and dbt_version.split('.')[1] | int < 8) -%}
             {%- set state.reason = "runtime graph cannot describe unit-test execution for build/test" -%}
+        {%- elif flags.WHICH in ["build", "test"] and graph.get("unit_tests")
+              and dbt_version.split('.')[0] != '2' -%}
+            {%- set state.reason = "runtime selection cannot describe unit-test execution for build/test" -%}
         {%- endif -%}
         {%- set nodes = {} -%}
         {%- if not state.reason -%}
