@@ -12,7 +12,7 @@ def capture(request):
     from dbt.adapters.factory import get_adapter_class_by_name, load_plugin
     from dbt.adapters.contracts.connection import AdapterResponse
     from dbt.exceptions import DbtRuntimeError
-    from dbt_common.clients.agate_helper import empty_table
+    from dbt_common.clients.agate_helper import empty_table, table_from_data_flat
     from dbt_common.events.contextvars import get_node_info
     from dbt.task import run as run_task
     from dbt.artifacts.schemas.run import RunStatus
@@ -57,7 +57,11 @@ def capture(request):
     def execute(self, sql, auto_begin=False, fetch=False, limit=None):
         record(sql, fetch)
         if fetch:
-            blocked("query_result_required")
+            supplied = state.get("query_results", {}).get(sql.strip())
+            if supplied is None:
+                blocked("query_result_required")
+            statements[-1]["result_source"] = "supplied_snapshot"
+            return UnknownResponse(_message=""), table_from_data_flat(supplied["rows"], supplied["columns"])
         return UnknownResponse(_message=""), empty_table()
 
     def add_query(self, sql, auto_begin=True, bindings=None, abridge_sql_log=False, **kwargs):
@@ -117,12 +121,14 @@ def capture(request):
     adapter.list_schemas = list_schemas
     adapter.list_relations_without_caching = list_relations
     adapter.get_columns_in_relation = columns
-    adapter.check_schema_exists = lambda self, database, schema: schema in list_schemas(self, database)
+    adapter.check_schema_exists = lambda self, database, schema: identifier(schema) in list_schemas(self, database)
     run_task.ModelRunner._build_run_model_result = model_result
     run_task.get_execution_status = hook_status
     result = dbtRunner().invoke(request["dbt_args"])
     return {
         "schema": "dbt_markers.execution_capture.v1",
+        "adapter_type": adapter_type,
+        "command": request["command"],
         "offline": True,
         "assumptions": ["supplied metadata is current", "captured statements succeed if executed"],
         "metadata_queries_replaced_by_snapshot": True,

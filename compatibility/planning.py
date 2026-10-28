@@ -35,7 +35,7 @@ def verify(dbt, root, smoke=False):
     records = {}
 
     def plan(label, previous=None, **overrides):
-        args = SimpleNamespace(dbt=dbt, project_dir=project, profiles_dir=project, command="build", default_database="warehouse", default_schema="canary",
+        args = SimpleNamespace(capture_python=None, warehouse_state=None, dbt=dbt, project_dir=project, profiles_dir=project, command="build", default_database="warehouse", default_schema="canary",
                                profile=None, target="local", vars="{}", select="c", exclude=None,
                                full_refresh=False, warehouse_context="duckdb/planning-canary/local",
                                output=root / (label + ".json"), previous=root / (previous + ".json") if previous else None,

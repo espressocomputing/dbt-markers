@@ -36,7 +36,7 @@ def descendants(roots, nodes):
     return affected
 
 
-def make_plan(manifest, results, selected, context, previous=None):
+def make_plan(manifest, results, selected, context, previous=None, capture=None):
     if manifest["metadata"]["invocation_id"] != results["metadata"]["invocation_id"]:
         raise ValueError("Manifest and compile results belong to different invocations")
     if results["args"]["which"] != "compile":
@@ -48,6 +48,7 @@ def make_plan(manifest, results, selected, context, previous=None):
         raise ValueError("Selected resources missing from manifest")
     macros = manifest.get("macros", {})
     nodes = {}
+    captured = {item["node_id"]: item for item in capture["node_results"]} if capture else {}
     for key, node in sorted(resources.items()):
         kind = node["resource_type"]
         dependencies = sorted(node.get("depends_on", {}).get("nodes", []))
@@ -77,8 +78,19 @@ def make_plan(manifest, results, selected, context, previous=None):
             reasons.append("runtime_hooks")
         if kind == "operation" and not sql:
             reasons.append("hook_requires_runtime_render")
+        generated = [statement for statement in capture["statements"] if statement["node_id"] == key] if capture else []
+        generation_complete = captured.get(key, {}).get("status") == "success" and not any(item["node_id"] == key for item in capture["blockers"]) if capture else False
+        if capture:
+            if generation_complete:
+                reasons = [reason for reason in reasons if not reason.startswith(("runtime_materialization:", "runtime_hooks", "hook_requires_runtime_render"))]
+                if kind in {"seed", "snapshot", "function"}:
+                    reasons = [reason for reason in reasons if reason not in {"compiled_sql_unavailable", "unsupported_resource_type:" + kind}]
+            elif key in selected:
+                reasons.append("execution_capture_incomplete")
         record = {
             "resource_type": kind,
+            "generated_statements": generated,
+            "sql_generation_complete": generation_complete,
             "package_name": node.get("package_name"),
             "tags": node.get("tags", []),
             "hook_index": node.get("index", 0),
@@ -100,6 +112,11 @@ def make_plan(manifest, results, selected, context, previous=None):
         }
         nodes[key] = record
     add_hooks(nodes)
+    if capture:
+        for node in nodes.values():
+            if node.get("hook_owner") and nodes[node["hook_owner"]]["sql_generation_complete"]:
+                node["unresolved"] = []
+                node["sql_capture_owner"] = node["hook_owner"]
     add_lineage(nodes, manifest["metadata"]["adapter_type"], context.get("default_database"), context.get("default_schema"))
     execution, execution_selected = execution_edges(nodes, selected, context.get("command", "build"), manifest["metadata"]["project_name"])
     for node in nodes.values():
@@ -122,6 +139,8 @@ def make_plan(manifest, results, selected, context, previous=None):
         "invocation_id": metadata["invocation_id"],
         "sql_scope": "compiled_node_body",
         "execution_sql_complete": False,
+        "selected_sql_generation_complete": bool(capture and capture["generation_completed"]),
+        "execution_capture": capture,
         "input_state_verified": False,
         "execution_reuse_authorized": False,
         "execution_policy": "Never skip work from plan equality alone; validate inputs and runtime SQL separately.",
@@ -220,7 +239,42 @@ def compile_plan(args):
         context = {"target": args.target, "profile": args.profile, "vars_hash": digest(args.vars),
                    "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context,
                    "command": args.command, "default_database": args.default_database, "default_schema": args.default_schema}
-        plan = make_plan(manifest, results, selected, context, previous)
+        capture = None
+        if args.capture_python:
+            if not args.warehouse_state:
+                raise ValueError("--capture-python requires --warehouse-state")
+            state = json.loads(args.warehouse_state.read_text())
+            if state["adapter_type"] != manifest["metadata"]["adapter_type"]:
+                raise ValueError("Warehouse state adapter does not match compile artifacts")
+            capture_dir = root / "capture"
+            capture_common = list(common)
+            capture_common[capture_common.index("--target-path") + 1] = str(capture_dir)
+            capture_args = ["--quiet", "--write-json", args.command, *capture_common, *selection]
+            if args.full_refresh:
+                capture_args.append("--full-refresh")
+            request_path, capture_path = root / "capture-request.json", root / "capture.json"
+            request_path.write_text(json.dumps({"warehouse_state": state, "command": args.command, "dbt_args": capture_args}))
+            request_path.chmod(0o600)
+            subprocess.run([str(args.capture_python), str(Path(__file__).with_name("capture_core.py")), "--request", str(request_path), "--output", str(capture_path)], cwd=project, capture_output=True, text=True, check=True)
+            capture = json.loads(capture_path.read_text())
+            context["warehouse_state_hash"] = digest(state)
+            captured_manifest_path = capture_dir / "manifest.json"
+            if captured_manifest_path.exists():
+                captured_manifest = json.loads(captured_manifest_path.read_text())
+                if captured_manifest["metadata"]["dbt_version"] != manifest["metadata"]["dbt_version"]:
+                    raise ValueError("Capture and compilation must use the same dbt version")
+                for collection in COLLECTIONS:
+                    for key, node in captured_manifest.get(collection, {}).items():
+                        original = manifest.get(collection, {}).get(key)
+                        if original is None or original.get("raw_code") != node.get("raw_code"):
+                            raise ValueError("Project changed between compilation and capture: " + key)
+                        if node.get("compiled"):
+                            manifest[collection][key] = node
+            else:
+                capture["generation_completed"] = False
+        elif args.warehouse_state:
+            raise ValueError("--warehouse-state requires --capture-python")
+        plan = make_plan(manifest, results, selected, context, previous, capture)
         if args.require_complete and not plan["compiled_selection_complete"]:
             raise ValueError("Selected plan has unresolved nodes/context: " + json.dumps({"nodes": plan["unresolved_nodes"], "context": plan["unresolved_context"]}))
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -231,6 +285,8 @@ def compile_plan(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dbt", default="dbt")
+    parser.add_argument("--capture-python", type=Path, help="Python from the matching dbt Core environment")
+    parser.add_argument("--warehouse-state", type=Path, help="Explicit metadata/results snapshot for offline SQL capture")
     parser.add_argument("--command", choices=["build", "run", "test"], default="build")
     parser.add_argument("--default-database")
     parser.add_argument("--default-schema")
