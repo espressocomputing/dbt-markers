@@ -255,7 +255,7 @@ def compile_plan(args):
             request_path, capture_path = root / "capture-request.json", root / "capture.json"
             request_path.write_text(json.dumps({"warehouse_state": state, "command": args.command, "dbt_args": capture_args}))
             request_path.chmod(0o600)
-            subprocess.run([str(args.capture_python), str(Path(__file__).with_name("capture_core.py")), "--request", str(request_path), "--output", str(capture_path)], cwd=project, capture_output=True, text=True, check=True)
+            subprocess.run([str(args.capture_python.absolute()), str(Path(__file__).with_name("capture_core.py")), "--request", str(request_path), "--output", str(capture_path)], cwd=project, capture_output=True, text=True, check=True)
             capture = json.loads(capture_path.read_text())
             context["warehouse_state_hash"] = digest(state)
             captured_manifest_path = capture_dir / "manifest.json"

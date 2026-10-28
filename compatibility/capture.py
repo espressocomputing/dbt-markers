@@ -96,4 +96,4 @@ if __name__ == "__main__":
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--directory", type=Path, required=True)
     args = parser.parse_args()
-    verify(str(args.python.resolve()), args.directory.resolve())
+    verify(str(args.python.absolute()), args.directory.resolve())
