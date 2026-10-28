@@ -51,16 +51,18 @@ def capture(request):
             blocked("cursor_result_required:" + name)
 
     def record(sql, fetch=False, bindings=None):
+        statement = {"node_id": identity(), "sql": sql, "fetch": fetch, "bindings": bindings}
         with lock:
-            statements.append({"node_id": identity(), "sql": sql, "fetch": fetch, "bindings": bindings})
+            statements.append(statement)
+        return statement
 
     def execute(self, sql, auto_begin=False, fetch=False, limit=None):
-        record(sql, fetch)
+        statement = record(sql, fetch)
         if fetch:
             supplied = state.get("query_results", {}).get(sql.strip())
             if supplied is None:
                 blocked("query_result_required")
-            statements[-1]["result_source"] = "supplied_snapshot"
+            statement["result_source"] = "supplied_snapshot"
             return UnknownResponse(_message=""), table_from_data_flat(supplied["rows"], supplied["columns"])
         return UnknownResponse(_message=""), empty_table()
 

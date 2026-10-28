@@ -37,6 +37,8 @@ def physical_reads(sql, dialect, database=None, schema=None):
         for statement in statements:
             if statement is None:
                 continue
+            if isinstance(statement, (exp.Insert, exp.Update, exp.Delete, exp.Merge)):
+                issues.add("dml_lineage_requires_state")
             if isinstance(statement, exp.Command):
                 issues.add("opaque_sql_statement")
             if list(statement.find_all(exp.Anonymous)):
@@ -75,9 +77,10 @@ def add_lineage(nodes, adapter, database=None, schema=None):
         node["declared_depends_on"] = list(node["depends_on"])
         node["sql_depends_on"] = []
         node["input_relations"] = []
-        if not node["compiled_sql"]:
+        texts = ([node["compiled_sql"]] if node["compiled_sql"] else []) + [statement["sql"] for statement in node.get("generated_statements", [])]
+        if not texts:
             continue
-        reads, issues = physical_reads(node["compiled_sql"], dialect, database, schema)
+        reads, issues = physical_reads(";\n".join(texts), dialect, database, schema)
         node["unresolved"].extend(issues)
         for parts in reads:
             node["input_relations"].append(list(parts))
