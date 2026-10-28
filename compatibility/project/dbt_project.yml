@@ -1,0 +1,11 @@
+name: dbt_markers_canary
+version: '1.0'
+config-version: 2
+profile: dbt_markers_canary
+
+query-comment:
+  comment: "{{ dbt_markers.query_comment(node) }}"
+  append: true
+
+on-run-start:
+  - "{{ dbt_markers.emit_manifest() if dbt_markers.emit_manifest is defined else '' }}"
