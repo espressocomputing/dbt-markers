@@ -129,10 +129,11 @@ def capture(request):
             if derived is None:
                 blocked("derived_column_metadata_missing:" + generated)
             return [self.Column.create(column["name"], column["data_type"]) for column in derived]
-        relations = schema_state(relation.database, relation.schema)["relations"]
-        if relation.identifier not in relations or "columns" not in relations[relation.identifier]:
+        database, schema, name = relation_key(table)
+        relations = schema_state(database, schema)["relations"]
+        if name not in relations or "columns" not in relations[name]:
             blocked("column_metadata_missing:" + str(relation))
-        return [self.Column.create(column["name"], column["data_type"]) for column in relations[relation.identifier]["columns"]]
+        return [self.Column.create(column["name"], column["data_type"]) for column in relations[name]["columns"]]
 
     def no_open(cls, connection):
         blocked("connection_open_forbidden")
