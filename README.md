@@ -102,10 +102,10 @@ This is a **graph projection, not the full `manifest.json` artifact**. It omits
 SQL, macros, docs, arbitrary config/meta, and disabled resources. Resources not
 exposed by a dbt engine's `graph` context cannot be exported (for example, Core
 1.10 does not expose the manifest's separate `unit_tests` collection there).
-Core 1.8+ also omits unit tests from `selected_resources`, so absence of missing
+Core 1.8–1.11 also omit unit tests from `selected_resources`, so absence of missing
 references alone cannot establish a complete execution graph for `build`/`test`.
 The hook falls back when the engine cannot expose unit-test definitions for those
-commands. Core 1.6–1.7 have no unit-test feature; v2 exposes that collection.
+commands. Core 1.6–1.7 have no unit-test feature; Core 1.12 and v2 expose that collection.
 Selection reflects the engine: v2 includes ephemeral ancestors that Core omits.
 
 Control delivery with `vars: {dbt_markers_manifest_mode: auto}`:

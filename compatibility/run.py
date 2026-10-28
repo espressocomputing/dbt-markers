@@ -126,6 +126,10 @@ def run(dbt, directory, package_ref=None, legacy=False, unit_tests=False, python
             sql = invoke("unit_build", ["build", "--select", "orders"])
             assert '"dbt_markers_manifest_status"' in sql or '"dbt_markers_manifest"' in sql
             results["unit_build"] = "markers_only" if '"dbt_markers_manifest_status"' in sql else "graph"
+            if results["unit_build"] == "graph":
+                graph = extract_manifest(sql)
+                unit_id = "unit_test.dbt_markers_canary.orders.orders_fixture"
+                assert unit_id in graph["nodes"] and unit_id in graph["selected_resources"]
     (directory / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     return results
 

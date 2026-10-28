@@ -34,10 +34,11 @@ support relative local packages, so Cloud tests use a pinned Git dependency.
 ## Behavior differences
 
 - Core 1.6–1.7 can send graphs for both `run` and `build`/`test`.
-- Core 1.8+ exposes neither unit-test definitions nor their selected IDs in the
+- Core 1.8–1.11 expose neither unit-test definitions nor their selected IDs in the
   runtime graph. `run` can send its graph, but `build`/`test` conservatively fall
   back in `auto` mode and fail in `required` mode, even if the project has no unit
   tests. This avoids claiming that missing definitions are known not to exist.
+- Core 1.12 exposes unit tests and can send build/test graphs.
 - v2 exposes unit tests and includes ephemeral ancestors in selection. Its graph
   excludes hook-operation nodes that Core includes. Consumers should use resource
   types instead of assuming every node corresponds to a warehouse query.
