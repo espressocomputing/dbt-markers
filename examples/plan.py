@@ -167,7 +167,7 @@ def compile_plan(args):
     if output.exists():
         raise ValueError("Output already exists; use a new plan path")
     with tempfile.TemporaryDirectory(prefix="dbt-markers-plan-") as temp:
-        common = ["--project-dir", str(project), "--target-path", temp, "--vars", args.vars, "--quiet", "--write-json"]
+        common = ["--project-dir", str(project), "--target-path", temp, "--vars", args.vars]
         for name in ("profiles_dir", "target", "profile"):
             value = getattr(args, name)
             if value:
@@ -176,7 +176,7 @@ def compile_plan(args):
         for name in ("select", "exclude"):
             if getattr(args, name):
                 selection.extend(["--" + name, getattr(args, name)])
-        listed = subprocess.run([args.dbt, "ls", *common, *selection, "--output", "json"], cwd=project, capture_output=True, text=True, check=True)
+        listed = subprocess.run([args.dbt, "--quiet", "--write-json", "ls", *common, *selection, "--output", "json"], cwd=project, capture_output=True, text=True, check=True)
         selected = []
         for line in listed.stdout.splitlines():
             if not line.startswith("{"):
@@ -184,7 +184,9 @@ def compile_plan(args):
             node = json.loads(line)
             if node.get("resource_type") in EXECUTABLE:
                 selected.append(node["unique_id"])
-        command = [args.dbt, "compile", *common]
+        if not selected:
+            raise ValueError("Selection contains no executable resources")
+        command = [args.dbt, "--quiet", "--write-json", "compile", *common]
         if args.full_refresh:
             command.append("--full-refresh")
         # Compile the whole project; selection is an independent execution mask.

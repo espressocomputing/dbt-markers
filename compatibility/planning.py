@@ -31,7 +31,7 @@ def verify(dbt, root, smoke=False):
         path = project / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(value)
-    subprocess.run([dbt, "seed", "--project-dir", str(project), "--profiles-dir", str(project), "--quiet"], check=True, capture_output=True, text=True)
+    subprocess.run([dbt, "--quiet", "seed", "--project-dir", str(project), "--profiles-dir", str(project)], check=True, capture_output=True, text=True)
     records = {}
 
     def plan(label, previous=None, **overrides):
@@ -131,7 +131,7 @@ def verify(dbt, root, smoke=False):
     assert changed["changes"]["context_changed"] and c in changed["changes"]["affected"]
 
     (project / "seeds/input.csv").write_text("id\n3\n4\n")
-    subprocess.run([dbt, "seed", "--full-refresh", "--project-dir", str(project), "--profiles-dir", str(project), "--quiet"], check=True, capture_output=True, text=True)
+    subprocess.run([dbt, "--quiet", "seed", "--full-refresh", "--project-dir", str(project), "--profiles-dir", str(project)], check=True, capture_output=True, text=True)
     changed = plan("input_data_edit", "baseline")
     assert c in changed["changes"]["unchanged"]
     assert not changed["execution_sql_complete"]
