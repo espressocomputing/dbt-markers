@@ -139,7 +139,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
     plan = {
         "schema": SCHEMA,
         "invocation_id": metadata["invocation_id"],
-        "sql_scope": "compiled_node_body",
+        "sql_scope": "compiled_node_body_and_adapter_submissions" if capture else "compiled_node_body",
         "execution_sql_complete": False,
         "selected_sql_generation_complete": bool(capture and capture["generation_completed"]),
         "execution_capture": capture,
@@ -265,7 +265,11 @@ def compile_plan(args):
                 captured_manifest = json.loads(captured_manifest_path.read_text())
                 if captured_manifest["metadata"]["dbt_version"] != manifest["metadata"]["dbt_version"]:
                     raise ValueError("Capture and compilation must use the same dbt version")
+                if {key: value["macro_sql"] for key, value in captured_manifest["macros"].items()} != {key: value["macro_sql"] for key, value in manifest["macros"].items()}:
+                    raise ValueError("Project macros changed between compilation and capture")
                 for collection in COLLECTIONS:
+                    if captured_manifest.get(collection, {}).keys() != manifest.get(collection, {}).keys():
+                        raise ValueError("Project resources changed between compilation and capture: " + collection)
                     for key, node in captured_manifest.get(collection, {}).items():
                         original = manifest.get(collection, {}).get(key)
                         if original is None or original.get("raw_code") != node.get("raw_code"):

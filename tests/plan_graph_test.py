@@ -19,6 +19,16 @@ class PlanGraphTest(unittest.TestCase):
         self.assertTrue(physical_reads("select * from unresolved", "snowflake")[1])
         self.assertEqual(physical_reads("select * from a", "snowflake", "DB", "S")[0], [("DB", "S", "A")])
 
+    def test_materialization_reads_keep_prior_state_and_exclude_created_temporaries(self):
+        sql = "create temporary table DB.S.TMP as select * from DB.S.INPUT; insert into DB.S.DEST select * from DB.S.TMP"
+        self.assertEqual(physical_reads(sql, "snowflake"), ([("DB", "S", "DEST"), ("DB", "S", "INPUT")], []))
+        nodes = {"a": node(sql="select * from DB.S.INPUT", relation="DB.S.A",
+                           generated_statements=[{"sql": "merge into DB.S.A using DB.S.INPUT on A.id=INPUT.id when matched then update set A.id=INPUT.id"}])}
+        add_lineage(nodes, "snowflake")
+        parents = [nodes[key] for key in nodes["a"]["sql_depends_on"]]
+        self.assertEqual({parent["state"] for parent in parents}, {"before_node", "external"})
+        self.assertNotIn("a", nodes["a"]["depends_on"])
+
     def test_sql_edges_external_inputs_and_cycles(self):
         nodes = {"a": node(sql="select * from EXTERNAL.S.INPUT", relation="DB.S.A"),
                  "b": node(sql="select * from DB.S.A", relation="DB.S.B")}
