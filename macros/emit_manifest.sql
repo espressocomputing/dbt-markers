@@ -72,20 +72,13 @@
             "selected_resources": selected_resources | sort,
             "nodes": nodes,
         }) -%}
-        {%- set manifest_id = local_md5(payload) -%}
-        {%- set chunk_size = 16000 -%}
-        {%- set chunk_count = (payload | length + chunk_size - 1) // chunk_size -%}
-        {%- for index in range(chunk_count) -%}
-            {%- set envelope = tojson({
-                "dbt_markers_manifest": 1,
-                "invocation_id": invocation_id,
-                "manifest_id": manifest_id,
-                "chunk_index": index,
-                "chunk_count": chunk_count,
-                "data": payload[index * chunk_size:(index + 1) * chunk_size],
-            }) | replace("/*", "\\u002f*") | replace("*/", "*\\/") -%}
-            {%- do run_query("select 1 /* " ~ envelope ~ " */") -%}
-        {%- endfor -%}
+        {%- set envelope = tojson({
+            "dbt_markers_manifest": 2,
+            "invocation_id": invocation_id,
+            "manifest_id": local_md5(payload),
+            "data": payload,
+        }) | replace("/*", "\\u002f*") | replace("*/", "*\\/") -%}
+        {%- do run_query("select 1 /* " ~ envelope ~ " */") -%}
         {%- endif -%}
     {%- endif -%}
 {%- endmacro %}
