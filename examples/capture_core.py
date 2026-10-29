@@ -219,8 +219,11 @@ def capture(request):
         return list(state["databases"][database]["schemas"])
 
     def list_relations(self, relation):
-        relations = schema_state(relation.database, relation.schema)["relations"]
-        return [self.Relation.create(database=relation.database, schema=relation.schema, identifier=name, type=data["type"])
+        database, schema = relation_key(sqlglot.parse_one(str(relation), read=adapter_type, into=exp.Table))
+        relations = schema_state(database, schema)["relations"]
+        if relations is None:
+            blocked("relation_metadata_missing:" + database + "." + schema)
+        return [self.Relation.create(database=database, schema=schema, identifier=name, type=data["type"])
                 for name, data in relations.items()]
 
     def columns(self, relation):
@@ -268,7 +271,12 @@ def capture(request):
     adapter.list_schemas = list_schemas
     adapter.list_relations_without_caching = list_relations
     adapter.get_columns_in_relation = columns
-    adapter.check_schema_exists = lambda self, database, schema: identifier(schema) in list_schemas(self, database)
+    def check_schema(self, database, schema):
+        relation = self.Relation.create(database=database, schema=schema, quote_policy=self.config.quoting).without_identifier()
+        database, schema = relation_key(sqlglot.parse_one(str(relation), read=adapter_type, into=exp.Table))
+        return schema in list_schemas(self, database)
+
+    adapter.check_schema_exists = check_schema
     run_task.ModelRunner.execute = execute_model
     run_task.ModelRunner._build_run_model_result = model_result
     run_task.get_execution_status = hook_status

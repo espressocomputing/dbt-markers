@@ -12,9 +12,10 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from examples.plan_graph import add_hooks, add_lineage, execution_edges
+from examples.plan_graph import DIALECTS, add_hooks, add_lineage, execution_edges
+from examples.plan_parameters import comparison_node, parameterize
 
-SCHEMA = "dbt_markers.plan.v2"
+SCHEMA = "dbt_markers.plan.v3"
 COLLECTIONS = ("nodes", "sources", "unit_tests", "functions")
 EXECUTABLE = {"model", "test", "seed", "snapshot", "unit_test", "function"}
 
@@ -121,8 +122,12 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
                 node["sql_capture_owner"] = node["hook_owner"]
     add_lineage(nodes, manifest["metadata"]["adapter_type"], context.get("default_database"), context.get("default_schema"))
     execution, execution_selected = execution_edges(nodes, selected, context.get("command", "build"), manifest["metadata"]["project_name"])
+    parameter_columns = context.get("runtime_parameter_columns", {})
+    dialect = DIALECTS.get(manifest["metadata"]["adapter_type"])
     for node in nodes.values():
         node["unresolved"] = sorted(set(node["unresolved"]))
+        node["runtime_parameters"] = parameterize(node.get("compiled_sql"), parameter_columns, dialect)[1]
+        node["comparison_fingerprint"] = digest(comparison_node(node, parameter_columns, dialect))
         node["fingerprint"] = digest(node)
     missing = {parent for node in nodes.values() for parent in node["depends_on"] if parent not in nodes}
     if missing:
@@ -133,7 +138,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
                "materialization_macros": {key: digest(macro["macro_sql"]) for key, macro in sorted(macros.items()) if macro["name"].startswith("materialization_")},
                "project_hooks": {key: node.get("raw_code") for key, node in resources.items() if node["resource_type"] == "operation"}}
     context_hash = digest(context)
-    fingerprints = {key: node["fingerprint"] for key, node in nodes.items()}
+    fingerprints = {key: node["comparison_fingerprint"] for key, node in nodes.items()}
     graph_hash = digest({"context": context_hash, "nodes": fingerprints})
     selected = sorted(set(selected))
     plan = {
@@ -163,15 +168,26 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
                 required.add(parent)
                 pending.append(parent)
     plan["unresolved_nodes"] = {key: nodes[key]["unresolved"] for key in sorted(required) if nodes[key]["unresolved"] and not (nodes[key]["resource_type"] == "seed" and key not in selected)}
+    plan["coverage"] = {
+        "compiled_bodies": {"available": sorted(key for key, node in nodes.items() if node.get("compiled_sql")),
+                            "missing": sorted(key for key, node in nodes.items() if node["resource_type"] in EXECUTABLE and not node.get("compiled_sql"))},
+        "materialization_sql": {"conditional": sorted(capture["materializations_generated"]) if capture else [],
+                                "not_captured": sorted(key for key in selected if nodes[key]["resource_type"] != "model" or nodes[key]["config"].get("materialized") != "ephemeral")},
+        "unresolved_dependencies": plan["unresolved_nodes"],
+        "runtime_validation_required": True,
+    }
+    plan["coverage"]["materialization_sql"]["not_captured"] = sorted(set(plan["coverage"]["materialization_sql"]["not_captured"]) - set(plan["coverage"]["materialization_sql"]["conditional"]))
     plan["unresolved_context"] = []
     plan["compiled_selection_complete"] = not (plan["unresolved_nodes"] or plan["unresolved_context"])
     if previous is not None:
         if previous["schema"] != SCHEMA:
             raise ValueError("Unsupported previous plan schema")
         old = previous["nodes"]
-        old_fingerprints = {key: node["fingerprint"] for key, node in old.items()}
+        old_fingerprints = {key: node["comparison_fingerprint"] for key, node in old.items()}
         if any(digest({k: v for k, v in node.items() if k != "fingerprint"}) != node["fingerprint"] for node in old.values()):
             raise ValueError("Previous plan node fingerprint mismatch")
+        if any(digest(comparison_node(node, previous["context"].get("runtime_parameter_columns", {}), DIALECTS.get(previous["context"]["adapter_type"]))) != node["comparison_fingerprint"] for node in old.values()):
+            raise ValueError("Previous plan comparison fingerprint mismatch")
         if digest(previous["context"]) != previous["context_hash"] or digest({"context": previous["context_hash"], "nodes": old_fingerprints}) != previous["graph_hash"]:
             raise ValueError("Previous plan graph fingerprint mismatch")
         if digest({"graph_hash": previous["graph_hash"], "selected_resources": previous["selected_resources"], "execution_edges": previous["execution_edges"], "execution_selected_resources": previous["execution_selected_resources"]}) != previous["plan_hash"]:
@@ -180,7 +196,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
         old = {}
     added = nodes.keys() - old.keys()
     removed = old.keys() - nodes.keys()
-    changed = {key for key in nodes.keys() & old.keys() if nodes[key]["fingerprint"] != old[key]["fingerprint"]}
+    changed = {key for key in nodes.keys() & old.keys() if nodes[key]["comparison_fingerprint"] != old[key]["comparison_fingerprint"]}
     context_changed = previous is None or previous["context_hash"] != context_hash
     roots = set(nodes) | set(old) if context_changed else added | removed | changed
     # Traverse both graphs: removed edges must invalidate their former descendants.
@@ -240,6 +256,7 @@ def compile_plan(args):
         results = json.loads((root / "run_results.json").read_text())
         context = {"target": args.target, "profile": args.profile, "vars_hash": digest(args.vars),
                    "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context,
+                   "runtime_parameter_columns": dict(item.split("=", 1) for item in getattr(args, "runtime_parameter_column", [])),
                    "command": args.command, "default_database": args.default_database, "default_schema": args.default_schema}
         capture = None
         if args.capture_python:
@@ -292,6 +309,7 @@ def compile_plan(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dbt", default="dbt")
+    parser.add_argument("--runtime-parameter-column", action="append", default=[], metavar="COLUMN=PARAMETER", help="Explicit output-literal parameter contract for stable comparison; preserves exact SQL")
     parser.add_argument("--capture-python", type=Path, help="Python from the matching dbt Core environment")
     parser.add_argument("--warehouse-state", type=Path, help="Explicit metadata/results snapshot for offline SQL capture")
     parser.add_argument("--command", choices=["build", "run", "test"], default="build")
