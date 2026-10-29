@@ -175,6 +175,8 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
                                 "not_captured": sorted(key for key in selected if nodes[key]["resource_type"] != "model" or nodes[key]["config"].get("materialized") != "ephemeral")},
         "unresolved_dependencies": plan["unresolved_nodes"],
         "runtime_validation_required": True,
+        "compile_time_database_reads": "not_traced",
+        "native_v2_check_gates": "not_verified",
     }
     plan["coverage"]["materialization_sql"]["not_captured"] = sorted(set(plan["coverage"]["materialization_sql"]["not_captured"]) - set(plan["coverage"]["materialization_sql"]["conditional"]))
     plan["unresolved_context"] = []

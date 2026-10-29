@@ -80,6 +80,15 @@ def capture(request):
         def __str__(self):
             blocked("query_result_required")
 
+        def __eq__(self, other):
+            blocked("query_result_required")
+
+        def __ne__(self, other):
+            blocked("query_result_required")
+
+        def __contains__(self, value):
+            blocked("query_result_required")
+
     original_store_result = ProviderContext.store_result
 
     def store_result(self, name, response, agate_table=None):
@@ -265,6 +274,14 @@ def capture(request):
             current_adapter.execute(sql, auto_begin=False, fetch=False)
         return RunStatus.Success, "CAPTURED; execution not performed"
 
+    original_hook_sql = run_task.RunTask.get_hook_sql
+
+    def hook_sql(self, adapter, hook, idx, num_hooks, extra_context):
+        if extra_context and "results" in extra_context:
+            extra_context = {**extra_context, "results": UnknownTable()}
+        return original_hook_sql(self, adapter, hook, idx, num_hooks, extra_context)
+
+    run_task.RunTask.get_hook_sql = hook_sql
     manager.open = classmethod(no_open)
     manager.execute = execute
     manager.add_query = add_query

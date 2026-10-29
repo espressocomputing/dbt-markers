@@ -91,6 +91,13 @@ def verify(python, root):
     assert "unit_test.capture_canary.b.b_unit" in result["materializations_generated"]
     (project / "models/units.yml").unlink()
 
+    original_project = (project / "dbt_project.yml").read_text()
+    (project / "dbt_project.yml").write_text(original_project + "on-run-end: [\"select {{ results | length }}\"]\n")
+    result = run("end_hook_results_blocked", select="a")
+    assert not result["generation_completed"]
+    assert any(item["reason"] == "query_result_required" for item in result["blockers"])
+    (project / "dbt_project.yml").write_text(original_project)
+
     a.write_text("{% if execute %}{% set rows = run_query('select max(id) from DATABASE.SCHEMA.INPUT') %}{% set value = rows.columns[0].values()[0] %}{% endif %}\nselect 1 as id\n")
     result = run("data_result_blocked", select="a")
     assert not result["generation_completed"]
