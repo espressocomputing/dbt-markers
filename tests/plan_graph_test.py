@@ -22,6 +22,7 @@ class PlanGraphTest(unittest.TestCase):
     def test_materialization_reads_keep_prior_state_and_exclude_created_temporaries(self):
         sql = "create temporary table DB.S.TMP as select * from DB.S.INPUT; insert into DB.S.DEST select * from DB.S.TMP"
         self.assertEqual(physical_reads(sql, "snowflake"), ([("DB", "S", "DEST"), ("DB", "S", "INPUT")], []))
+        self.assertEqual(physical_reads("drop table DB.S.OLD", "snowflake"), ([], []))
         nodes = {"a": node(sql="select * from DB.S.INPUT", relation="DB.S.A",
                            generated_statements=[{"sql": "merge into DB.S.A using DB.S.INPUT on A.id=INPUT.id when matched then update set A.id=INPUT.id"}])}
         add_lineage(nodes, "snowflake")
