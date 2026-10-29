@@ -42,9 +42,10 @@ def descendants(roots, nodes):
 def make_plan(manifest, results, selected, context, previous=None, capture=None, allow_partial=False):
     if manifest["metadata"]["invocation_id"] != results["metadata"]["invocation_id"]:
         raise ValueError("Manifest and compile results belong to different invocations")
-    if results["args"]["which"] != "compile":
-        raise ValueError("Planning requires dbt compile artifacts")
-    failed_compilations = {result["unique_id"]: result.get("message") for result in results["results"] if result["status"] != "success"}
+    artifact_source = results["args"]["which"]
+    if artifact_source != "compile" and capture is None:
+        raise ValueError("Planning requires compile artifacts or matching capture artifacts")
+    failed_compilations = {result["unique_id"]: result.get("message") for result in results["results"] if result["status"] != "success"} if artifact_source == "compile" else {}
     if failed_compilations and not allow_partial:
         raise ValueError("Compilation did not succeed for every result")
     resources = {key: node for collection in COLLECTIONS for key, node in manifest.get(collection, {}).items()}
@@ -148,6 +149,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None,
     selected = sorted(set(selected))
     plan = {
         "schema": SCHEMA,
+        "artifact_source": artifact_source,
         "invocation_id": metadata["invocation_id"],
         "compilation_errors": failed_compilations,
         "sql_scope": "compiled_node_body_and_adapter_submissions" if capture else "compiled_node_body",
@@ -254,6 +256,7 @@ def compile_plan(args):
                 selected.append(node["unique_id"])
         if not selected:
             raise ValueError("Selection contains no executable resources")
+        parsed_manifest = json.loads((Path(temp) / "manifest.json").read_text())
         native_checks = None
         if getattr(args, "validate_native_checks", False):
             checked = subprocess.run([args.dbt, "check", *common, *selection], cwd=project, capture_output=True, text=True, check=True)
@@ -262,10 +265,10 @@ def compile_plan(args):
         if args.full_refresh:
             command.append("--full-refresh")
         # Compile the whole project; selection is an independent execution mask.
-        compiled = subprocess.run(command, cwd=project, capture_output=True, text=True, check=not getattr(args, "allow_partial", False))
+        compiled = subprocess.run(command, cwd=project, capture_output=True, text=True, check=not (getattr(args, "allow_partial", False) or args.capture_python))
         root = Path(temp)
         compilation_scope = "whole_project"
-        if compiled.returncode:
+        if compiled.returncode and not args.capture_python:
             if not args.select:
                 raise ValueError("Partial compilation requires an explicit --select for the component to retain")
             root = root / "selected-component"
@@ -273,8 +276,12 @@ def compile_plan(args):
             selected_command[selected_command.index("--target-path") + 1] = str(root)
             subprocess.run([*selected_command, *selection], cwd=project, capture_output=True, text=True, check=True)
             compilation_scope = "selected_component"
-        manifest = json.loads((root / "manifest.json").read_text())
-        results = json.loads((root / "run_results.json").read_text())
+        if compiled.returncode and args.capture_python:
+            manifest, results = parsed_manifest, None
+            compilation_scope = "capture_selected"
+        else:
+            manifest = json.loads((root / "manifest.json").read_text())
+            results = json.loads((root / "run_results.json").read_text())
         context = {"target": args.target, "profile": args.profile, "vars_hash": digest(args.vars),
                    "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context,
                    "native_checks_passed": native_checks is not None,
@@ -323,14 +330,22 @@ def compile_plan(args):
                             raise ValueError("Project changed between compilation and capture: " + key)
                         if node.get("compiled"):
                             manifest[collection][key] = node
+                if results is None:
+                    manifest = captured_manifest
+                    captured_results = capture_dir / "run_results.json"
+                    if not captured_results.exists():
+                        raise ValueError("Capture could not produce planning artifacts after compilation failed")
+                    results = json.loads(captured_results.read_text())
             else:
                 capture["generation_completed"] = False
         elif args.warehouse_state:
             raise ValueError("--warehouse-state requires --capture-python")
+        if results is None:
+            raise ValueError("Neither compilation nor capture produced planning artifacts")
         plan = make_plan(manifest, results, selected, context, previous, capture, allow_partial=getattr(args, "allow_partial", False))
         plan["coverage"]["native_v2_check_gates"] = native_checks or "not_verified"
         plan["coverage"]["compilation_scope"] = compilation_scope
-        if compilation_scope == "selected_component":
+        if compilation_scope != "whole_project":
             plan["compilation_errors"]["whole_project"] = compiled.stdout + compiled.stderr
         if args.require_complete and not plan["compiled_selection_complete"]:
             raise ValueError("Selected plan has unresolved nodes/context: " + json.dumps({"nodes": plan["unresolved_nodes"], "context": plan["unresolved_context"]}))
