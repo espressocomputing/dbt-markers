@@ -61,12 +61,13 @@ def run(directory):
                 if "dbt_markers" in meta:
                     markers.append(meta)
         assert markers, label
+        (directory / f"{label}.sql").write_text("\n".join(statements) + "\n")
         (directory / f"{label}.markers.json").write_text(json.dumps(markers, indent=2) + "\n")
         assert any("node_unique_id" not in meta for meta in markers), label
         assert any(meta.get("node_unique_id") == "model.invocation_canary.orders" for meta in markers), label
         return markers
 
-    baseline = invoke(core, "baseline", ["run", "--select", "orders"])
+    baseline = invoke(core, "baseline", ["build", "--select", "orders"])
     assert {meta["invocation_command"] for meta in baseline} == {"dbt"}
     assert all("invocation_args" not in meta for meta in baseline)
     runner = dbtRunner(callbacks=[capture])

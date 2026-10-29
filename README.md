@@ -108,7 +108,8 @@ Every marked statement, including setup queries without a node, then carries:
 Available fields also include `profile`, `target`, `defer`, `state`, `defer_state`,
 `favor_state`, `indirect_selection`, `resource_types`, `exclude_resource_types`,
 and `empty`. Values retain their JSON types; fields absent in a Core version are
-omitted. `invocation_command` reflects the arguments passed to `invoke()`;
+omitted. `profile` and `target` can be null when defaulted; the resolved target
+is still recorded in `target_name`. `invocation_command` reflects the arguments passed to `invoke()`;
 `invocation_args` is authoritative for keyword overrides. `invocation_vars` is
 JSON-serialized from the parsed vars when using the bridge.
 
