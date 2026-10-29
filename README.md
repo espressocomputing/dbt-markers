@@ -124,7 +124,7 @@ Reproduce the missing command and verify the bridge against a disposable DuckDB
 project using an environment with Core and dbt-duckdb installed:
 
 ```sh
-python compatibility/invocation.py --directory /tmp/markers-invocation
+python compatibility/invocation_test.py --directory /tmp/markers-invocation
 ```
 
 ## Deliver the graph before model execution

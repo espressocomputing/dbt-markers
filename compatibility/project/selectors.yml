@@ -1,0 +1,5 @@
+selectors:
+  - name: hourly
+    definition:
+      method: fqn
+      value: orders

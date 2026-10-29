@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from importlib.metadata import version
 from pathlib import Path
@@ -17,23 +18,8 @@ from dbt_markers_runner import dbtRunner
 
 def run(directory):
     package = Path(__file__).resolve().parents[1]
-    directory.mkdir(parents=True)
-    (directory / "models").mkdir()
-    (directory / "models" / "orders.sql").write_text("select 1 as id\n")
-    (directory / "models" / "other.sql").write_text("select 2 as id\n")
-    (directory / "dbt_project.yml").write_text(
-        "name: invocation_canary\nversion: '1.0'\nconfig-version: 2\n"
-        "profile: invocation_canary\n"
-        'query-comment:\n  comment: "{{ dbt_markers.query_comment(node) }}"\n  append: true\n'
-    )
-    (directory / "profiles.yml").write_text(
-        "invocation_canary:\n  target: prd\n  outputs:\n    prd:\n"
-        "      type: duckdb\n      path: data.duckdb\n      schema: canary\n      threads: 2\n"
-    )
+    shutil.copytree(package / "compatibility" / "project", directory)
     (directory / "packages.yml").write_text(f"packages:\n  - local: {package}\n")
-    (directory / "selectors.yml").write_text(
-        "selectors:\n  - name: hourly\n    definition:\n      method: fqn\n      value: orders\n"
-    )
     os.chdir(directory)
     os.environ.update(
         DBT_PROFILES_DIR=str(directory), DBT_SEND_ANONYMOUS_USAGE_STATS="false",
@@ -49,6 +35,7 @@ def run(directory):
 
     core = CoreRunner(callbacks=[capture])
     assert core.invoke(["deps"]).success
+    assert core.invoke(["seed"]).success
 
     def invoke(runner, label, argv, **kwargs):
         statements.clear()
@@ -74,11 +61,11 @@ def run(directory):
     original = flags.get_flag_obj
     results = {"dbt_core": version("dbt-core"), "baseline_command": "dbt"}
     cases = [
-        ("selected", ["run", "--select", "orders", "--exclude", "other", "--vars", '{"window": "one two"}'], {}),
-        ("repeated", ["run", "--select", "orders", "--exclude", "other", "--vars", '{"window": "one two"}'], {}),
-        ("other", ["run", "--select", "other"], {}),
+        ("selected", ["run", "--select", "orders", "--exclude", "unselected", "--vars", '{"window": "one two"}'], {}),
+        ("repeated", ["run", "--select", "orders", "--exclude", "unselected", "--vars", '{"window": "one two"}'], {}),
+        ("unselected", ["run", "--select", "unselected"], {}),
         ("selector", ["build", "--selector", "hourly", "--full-refresh"], {}),
-        ("kwargs", ["run"], {"select": ["orders"], "exclude": ["other"], "vars": {"window": "kwargs"}}),
+        ("kwargs", ["run"], {"select": ["orders"], "exclude": ["unselected"], "vars": {"window": "kwargs"}}),
     ]
     captured = {}
     for label, argv, kwargs in cases:
@@ -88,7 +75,7 @@ def run(directory):
         invocation = markers[0]["invocation_args"]
         assert all(meta["invocation_args"] == invocation for meta in markers), label
         assert invocation["project_dir"] == str(directory)
-        assert markers[0]["project_name"] == "invocation_canary"
+        assert markers[0]["project_name"] == "dbt_markers_canary"
         assert markers[0]["target_name"] == "prd"
         if label == "selector":
             assert invocation["which"] == "build"
@@ -97,15 +84,15 @@ def run(directory):
             assert not invocation["select"]
             assert not invocation["exclude"]
             assert invocation["vars"] == {}
-        elif label == "other":
-            assert invocation["select"] == ["other"]
+        elif label == "unselected":
+            assert invocation["select"] == ["unselected"]
             assert not invocation["exclude"]
             assert invocation["vars"] == {}
-            assert any(meta.get("node_unique_id") == "model.invocation_canary.other" for meta in markers)
+            assert any(meta.get("node_unique_id") == "model.dbt_markers_canary.unselected" for meta in markers)
         else:
             assert invocation["which"] == "run"
             assert invocation["select"] == ["orders"]
-            assert invocation["exclude"] == ["other"]
+            assert invocation["exclude"] == ["unselected"]
             assert invocation["vars"] == {"window": "kwargs" if label == "kwargs" else "one two"}
             assert json.loads(markers[0]["invocation_vars"]) == invocation["vars"]
         captured[label] = markers
