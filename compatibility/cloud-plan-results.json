@@ -1,0 +1,19 @@
+{
+  "cloud_run_id": 522734158,
+  "cloud_version": "2026.10.26+27787ee",
+  "stable_repeat_graph": true,
+  "compiled_model_bodies": 24,
+  "compiled_test_bodies": 43,
+  "cloud_model_ctas_bodies_matched": 16,
+  "cloud_test_bodies_matched": 43,
+  "history_nodes": 59,
+  "history_statements": 59,
+  "unresolved_nodes": {},
+  "offline_full_statements_matched": 59,
+  "offline_statement_differences": [],
+  "live_existing_catalog_capture": {
+    "complete": true,
+    "statements": 16
+  },
+  "temporary_resources_removed": true
+}
