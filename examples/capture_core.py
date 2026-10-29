@@ -185,7 +185,12 @@ def capture(request):
             statements.append(statement)
             for expression in parsed:
                 generated_catalog.record(expression)
-                if isinstance(expression, (exp.Create, exp.Drop)):
+                if isinstance(expression, exp.Drop):
+                    for table in expression.args.get("tables") or [expression.this]:
+                        if isinstance(table, exp.Table):
+                            declared_columns.pop(relation_key(table), None)
+                            generated_relations.pop(relation_key(table), None)
+                if isinstance(expression, exp.Create):
                     target = expression.this.this if isinstance(expression.this, exp.Schema) else expression.this
                     if isinstance(target, exp.Table):
                         declared_columns.pop(relation_key(target), None)

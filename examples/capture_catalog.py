@@ -40,8 +40,10 @@ class GeneratedCatalog:
                         new = (*old[:-1], *new)
                     if old in self.queries:
                         self.queries[new] = self.queries.pop(old)
-        elif isinstance(statement, exp.Drop) and isinstance(statement.this, exp.Table):
-            self.queries.pop(relation_key(statement.this, self.dialect), None)
+        elif isinstance(statement, exp.Drop):
+            for table in statement.args.get("tables") or [statement.this]:
+                if isinstance(table, exp.Table):
+                    self.queries.pop(relation_key(table, self.dialect), None)
 
     def expand(self, query, seen=()):
         result = query.copy()
