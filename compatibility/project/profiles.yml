@@ -1,0 +1,8 @@
+dbt_markers_canary:
+  target: prd
+  outputs:
+    prd:
+      type: duckdb
+      path: data.duckdb
+      schema: canary
+      threads: 2

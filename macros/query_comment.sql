@@ -15,6 +15,9 @@
 #}
 {% macro query_comment(node, extra={}) -%}
     {%- set has_node = node is defined and node is not none -%}
+    {%- set invocation_args = flags.DBT_MARKERS_INVOCATION_ARGS
+        if flags.DBT_MARKERS_INVOCATION_ARGS is defined and flags.DBT_MARKERS_INVOCATION_ARGS is mapping
+        else none -%}
 
     {#- invocation_command: the executable becomes "dbt", the value after --vars is
         redacted up to the next flag (-x / --xyz), and whitespace collapses to one space.
@@ -69,13 +72,14 @@
 
     {#- Every key in output order. Keys in `typed` are written when not none; all others
         only when the value is a non-empty string. -#}
-    {%- set typed = ["full_refresh", "node_ref_names", "node_depends_on", "node_tags", "node_meta"] -%}
+    {%- set typed = ["full_refresh", "node_ref_names", "node_depends_on", "node_tags", "node_meta", "invocation_args"] -%}
     {%- set fields = {
         "dbt_markers": "1.0.0",
         "invocation_id": invocation_id,
         "which": flags.WHICH,
         "invocation_command": words | join(" ") if command is string and command.strip() != "" else none,
-        "invocation_vars": vars_words | join(" "),
+        "invocation_vars": tojson(invocation_args.vars) if invocation_args is not none and invocation_args.get("vars") is mapping else vars_words | join(" "),
+        "invocation_args": invocation_args,
         "full_refresh": flags.FULL_REFRESH if flags.FULL_REFRESH is boolean else none,
         "run_started_at": run_started_at.isoformat() if run_started_at is defined and run_started_at is not none else none,
         "dbt_version": dbt_version,
