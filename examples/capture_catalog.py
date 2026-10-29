@@ -85,7 +85,11 @@ class GeneratedCatalog:
                     dtype = f"VARCHAR({column.internal_size})"
                 elif name == "REAL":
                     dtype = "FLOAT"
-                elif name in {"DATE", "BOOLEAN", "VARIANT", "OBJECT", "ARRAY", "BINARY", "TIME", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ", "GEOGRAPHY", "GEOMETRY"}:
+                elif name == "BINARY":
+                    dtype = f"BINARY({column.internal_size})"
+                elif name in {"TIME", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ"}:
+                    dtype = f"{name}({column.scale})" if column.scale is not None else name
+                elif name in {"DATE", "BOOLEAN", "VARIANT", "GEOGRAPHY", "GEOMETRY"}:
                     dtype = name
                 else:
                     raise ValueError("Unsupported described Snowflake type: " + name)
