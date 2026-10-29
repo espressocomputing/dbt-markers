@@ -69,7 +69,33 @@ def capture(request):
         def __str__(self):
             blocked("statement_response_required:string")
 
+    class UnknownColumn:
+        def __init__(self, name):
+            self.name = name
+
+        def __getattr__(self, name):
+            blocked("query_result_required")
+
     class UnknownTable:
+        def __init__(self, sql=None):
+            self.sql = sql
+
+        @property
+        def column_names(self):
+            query = sqlglot.parse_one(self.sql, read=adapter_type) if self.sql else None
+            if not isinstance(query, exp.Query):
+                blocked("query_result_required")
+            metadata = generated_catalog.describe_query(query)
+            if metadata is None:
+                blocked("query_result_required")
+            return tuple(column["name"] for column in metadata)
+
+        @property
+        def columns(self):
+            from agate import MappedSequence
+            names = self.column_names
+            return MappedSequence([UnknownColumn(name) for name in names], names)
+
         def __getattr__(self, name):
             blocked("query_result_required")
 
@@ -174,6 +200,9 @@ def capture(request):
             if not ((where and isinstance(where.this, exp.Boolean) and where.this.this is False)
                     or (limit and isinstance(limit.expression, exp.Literal) and limit.expression.this == "0")):
                 return None
+            if request.get("describe_connection_env"):
+                metadata = generated_catalog.describe_query(query)
+                return {"columns": [column["name"] for column in metadata], "rows": []}
             schema = {database: {name: {table: {column["name"]: column["data_type"] for column in data.get("columns", [])}
                                       for table, data in (values["relations"] or {}).items()}
                                  for name, values in details["schemas"].items()}
@@ -203,7 +232,7 @@ def capture(request):
                 supplied = zero_row_projection(sql)
                 if supplied is None:
                     statement["result_source"] = "unknown"
-                    return UnknownResponse(_message=""), UnknownTable()
+                    return UnknownResponse(_message=""), UnknownTable(sql)
                 statement["result_source"] = "zero_row_projection"
             else:
                 statement["result_source"] = "supplied_snapshot"
@@ -247,12 +276,12 @@ def capture(request):
     def columns(self, relation):
         table = sqlglot.parse_one(str(relation), read=adapter_type, into=exp.Table)
         generated = generated_relations.get(relation_key(table))
-        if generated:
+        if generated or relation_key(table) in generated_catalog.queries:
             derived = state.get("derived_columns", {}).get(generated)
             if derived is None:
                 derived = generated_catalog.describe(table)
             if derived is None:
-                blocked("derived_column_metadata_missing:" + generated)
+                blocked("derived_column_metadata_missing:" + str(generated))
             return [self.Column.create(column["name"], column["data_type"]) for column in derived]
         database, schema, name = relation_key(table)
         relations = schema_state(database, schema)["relations"]

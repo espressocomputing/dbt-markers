@@ -274,6 +274,9 @@ def compile_plan(args):
             capture_common = list(common)
             capture_common[capture_common.index("--target-path") + 1] = str(capture_dir)
             capture_args = ["--quiet", "--write-json", args.command, *capture_common, *selection]
+            for flag in ("event_time_start", "event_time_end"):
+                if getattr(args, flag, None):
+                    capture_args.extend(["--" + flag.replace("_", "-"), getattr(args, flag)])
             if args.full_refresh:
                 capture_args.append("--full-refresh")
             request_path, capture_path = root / "capture-request.json", root / "capture.json"
@@ -283,6 +286,9 @@ def compile_plan(args):
             capture = json.loads(capture_path.read_text())
             context["warehouse_state_hash"] = digest({key: value for key, value in state.items() if key != "collected_at"})
             context["capture_versions"] = capture["versions"]
+            context["event_time_start"] = getattr(args, "event_time_start", None)
+            context["event_time_end"] = getattr(args, "event_time_end", None)
+            context["conditional_test_gates"] = capture["conditional_test_gates"]
             captured_manifest_path = capture_dir / "manifest.json"
             if captured_manifest_path.exists():
                 captured_manifest = json.loads(captured_manifest_path.read_text())
@@ -332,6 +338,8 @@ def main():
     parser.add_argument("--select")
     parser.add_argument("--exclude")
     parser.add_argument("--full-refresh", action="store_true")
+    parser.add_argument("--event-time-start", help="Explicit microbatch capture window start")
+    parser.add_argument("--event-time-end", help="Explicit microbatch capture window end")
     parser.add_argument("--warehouse-context", required=True, help="Non-secret warehouse/account/role identity; changes invalidate the plan")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--previous", type=Path)
