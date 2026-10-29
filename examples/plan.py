@@ -62,12 +62,16 @@ def compile_capture(args):
     if output.exists():
         raise ValueError("Output already exists; use a new capture path")
     if getattr(args, "artifacts", None):
+        if args.select or args.exclude or args.capture_python or args.warehouse_state:
+            raise ValueError("Artifact import does not execute selectors or generate SQL; omit selection and capture options")
         manifest = json.loads((args.artifacts / "manifest.json").read_text())
         results = json.loads((args.artifacts / "run_results.json").read_text())
         selected = [result["unique_id"] for result in results["results"]]
         artifact = make_capture(manifest, results, selected, {"warehouse_context": args.warehouse_context, "artifact_origin": "supplied_files"})
         artifact["coverage"]["selection_source"] = "run_results; original selector not reconstructed"
         artifact["coverage"]["compilation_side_effects"] = "not_observed; importer executes no dbt commands"
+        if args.require_complete and not artifact["selected_bodies_available"]:
+            raise ValueError("Supplied artifacts have missing compiled bodies")
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({"dbt_capture": artifact}, indent=2) + "\n")
         return artifact

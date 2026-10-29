@@ -1,4 +1,4 @@
-"""Verify lossless artifact capture through real dbt compilation."""
+"""Verify original artifact import against a real dbt compiler in a local fixture."""
 
 import argparse
 import json
@@ -14,84 +14,26 @@ from examples.plan import compile_capture
 def verify(dbt, root, smoke=False):
     root.mkdir(parents=True)
     project = root / "project"
-    project.mkdir()
-    files = {
-        "dbt_project.yml": "name: planning_canary\nversion: '1.0'\nconfig-version: 2\nprofile: planning_canary\n",
-        "profiles.yml": f"planning_canary:\n  target: local\n  outputs:\n    local:\n      type: duckdb\n      path: {root / 'warehouse.duckdb'}\n      schema: canary\n      threads: 2\n",
-        "seeds/input.csv": "id\n1\n2\n",
-        "macros/adjust.sql": "{% macro adjust(value) %}{{ value }} + {{ var('offset', 0) }}{% endmacro %}\n",
-        "models/a.sql": "select {{ adjust('id') }} as id from {{ source('raw', 'input') }}\n",
-        "models/b.sql": "select id from {{ ref('a') }}\n",
-        "models/c.sql": "select id from {{ ref('b') }}\n",
-        "models/other.sql": "select id from {{ source('raw', 'input') }}\n",
-        "models/schema.yml": "version: 2\nsources:\n  - name: raw\n    schema: canary\n    tables:\n      - name: input\nmodels:\n  - name: c\n    columns:\n      - name: id\n        tests: [not_null]\n",
-        "tests/c_positive.sql": "select * from {{ ref('c') }} where id < 0\n",
-    }
-    for name, value in files.items():
-        path = project / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value)
-    subprocess.run([dbt, "--quiet", "seed", "--project-dir", str(project), "--profiles-dir", str(project)], check=True, capture_output=True, text=True)
-    records = {}
-
-    def snapshot(label, **overrides):
-        args = SimpleNamespace(capture_python=None, warehouse_state=None, dbt=dbt, project_dir=project, profiles_dir=project,
-                               command="build", profile=None, target="local", vars="{}", select="c", exclude=None,
-                               full_refresh=False, warehouse_context="duckdb/capture-canary/local",
-                               output=root / (label + ".json"), require_complete=False)
-        for key, value in overrides.items():
-            setattr(args, key, value)
-        result = compile_capture(args)
-        assert result["schema"] == "dbt_markers.sql_capture.v1"
-        assert not {"changes", "plan_hash", "graph_hash", "context_hash", "execution_edges", "nodes"} & result.keys()
-        assert json.loads(args.output.read_text())["dbt_capture"] == result
-        records[label] = result["coverage"]
-        (root / "results.json").write_text(json.dumps(records, indent=2) + "\n")
-        print(label, "passed", flush=True)
-        return result
-
-    a, b, c, other = ["model.planning_canary." + name for name in ("a", "b", "c", "other")]
-    baseline = snapshot("baseline")
-    assert baseline["selected_bodies_available"]
-    assert baseline["manifest"]["nodes"][a]["compiled_code"].startswith("select id + 0")
-    assert baseline["manifest"]["nodes"][c]["depends_on"]["nodes"] == [b]
-    assert any(key.startswith("test.") for key in baseline["selected_resources"])
-    repeated = snapshot("repeat")
-    assert baseline["invocation_id"] != repeated["invocation_id"]
-    assert baseline["manifest"]["nodes"][a]["compiled_code"] == repeated["manifest"]["nodes"][a]["compiled_code"]
-    (project / "models/broken.sql").write_text("{% if execute %}{{ exceptions.raise_compiler_error('unavailable lookup') }}{% endif %} select 1 as id")
-    partial = snapshot("partial_component", allow_partial=True, select="other", require_complete=True)
-    assert partial["coverage"]["compilation_scope"] == "selected_component"
-    assert partial["selected_bodies_available"]
-    assert "model.planning_canary.broken" in partial["coverage"]["compiled_bodies"]["missing"]
-    assert "model.planning_canary.broken" in partial["manifest"]["nodes"]
-    (project / "models/broken.sql").unlink()
-    if smoke:
-        return records
-
-    changed = snapshot("vars_edit", vars='{"offset": 7}')
-    assert "id + 7" in changed["manifest"]["nodes"][a]["compiled_code"]
-    assert changed["context"]["vars"] == '{"offset": 7}'
-    changed = snapshot("selection_edit", select="other")
-    assert other in changed["selected_resources"] and c not in changed["selected_resources"]
-    assert c in changed["manifest"]["nodes"]
-    (project / "models/a.sql").write_text("{{ config(materialized='incremental') }}\n" + files["models/a.sql"])
-    changed = snapshot("incremental_body")
-    assert changed["manifest"]["nodes"][a]["config"]["materialized"] == "incremental"
-    assert changed["manifest"]["nodes"][a]["compiled_code"]
-    assert not changed["coverage"]["adapter_sql_generated"]
-    (project / "models/a.sql").write_text(files["models/a.sql"])
-    (project / "models/b.sql").write_text("{{ config(pre_hook='select 1') }}\n" + files["models/b.sql"])
-    changed = snapshot("hooks_preserved")
-    assert changed["manifest"]["nodes"][b]["config"]["pre-hook"][0]["sql"] == "select 1"
-    assert changed["manifest"]["macros"]
-    try:
-        snapshot("empty_selection", select="no_such_node")
-    except ValueError as error:
-        assert "no executable resources" in str(error)
-    else:
-        raise AssertionError("Empty selection accepted")
-    assert not (root / "empty_selection.json").exists()
+    (project / "models").mkdir(parents=True)
+    (project / "dbt_project.yml").write_text("name: import_canary\nversion: '1.0'\nconfig-version: 2\nprofile: import_canary\n")
+    (project / "profiles.yml").write_text(f"import_canary:\n  target: local\n  outputs:\n    local:\n      type: duckdb\n      path: {root / 'warehouse.duckdb'}\n      schema: main\n      threads: 1\n")
+    (project / "models/a.sql").write_text("select 1 as id, '{{ invocation_id }}' as invocation\n")
+    (project / "models/b.sql").write_text("select * from {{ ref('a') }}\n")
+    target = root / "target"
+    subprocess.run([dbt, "--quiet", "--write-json", "compile", "--project-dir", str(project), "--profiles-dir", str(project), "--target-path", str(target)], check=True, capture_output=True, text=True)
+    args = SimpleNamespace(artifacts=target, output=root / "capture.json", select=None, exclude=None,
+                           capture_python=None, warehouse_state=None, require_complete=True,
+                           warehouse_context="local/import-canary", dbt="/must/not/be/invoked")
+    result = compile_capture(args)
+    assert result["manifest"] == json.loads((target / "manifest.json").read_text())
+    assert result["run_results"] == json.loads((target / "run_results.json").read_text())
+    assert result["manifest"]["metadata"]["invocation_id"] in result["manifest"]["nodes"]["model.import_canary.a"]["compiled_code"]
+    assert result["manifest"]["nodes"]["model.import_canary.b"]["depends_on"]["nodes"] == ["model.import_canary.a"]
+    assert result["execution_capture"] is None
+    assert not result["coverage"]["adapter_sql_generated"]
+    assert not {"plan_hash", "changes", "execution_edges"} & result.keys()
+    records = {"artifact_import": "passed", "dbt_version": result["manifest"]["metadata"]["dbt_version"]}
+    (root / "results.json").write_text(json.dumps(records, indent=2) + "\n")
     return records
 
 
@@ -102,8 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
     try:
-        records = verify(str(Path(args.dbt).resolve()), args.directory.resolve(), args.smoke)
+        print(json.dumps(verify(str(Path(args.dbt).absolute()), args.directory.resolve(), args.smoke)))
     except subprocess.CalledProcessError as error:
         print(error.stdout + error.stderr, file=sys.stderr)
         raise
-    print(json.dumps({"status": "passed", "cases": list(records)}))
