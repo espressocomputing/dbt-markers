@@ -43,7 +43,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None,
     if manifest["metadata"]["invocation_id"] != results["metadata"]["invocation_id"]:
         raise ValueError("Manifest and compile results belong to different invocations")
     artifact_source = results["args"]["which"]
-    if artifact_source != "compile" and capture is None:
+    if artifact_source != "compile" and (capture is None or artifact_source != capture["command"]):
         raise ValueError("Planning requires compile artifacts or matching capture artifacts")
     failed_compilations = {result["unique_id"]: result.get("message") for result in results["results"] if result["status"] != "success"} if artifact_source == "compile" else {}
     if failed_compilations and not allow_partial:
@@ -130,6 +130,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None,
         checks = [key for key, node in nodes.items() if node["resource_type"] == "check"]
         execution.extend({"from": key, "to": target, "kind": "local_validation_gate"} for key in checks for target in selected if target != key)
         execution_selected = sorted(set(execution_selected) | set(checks))
+        execution.sort(key=lambda edge: (edge["from"], edge["to"], edge["kind"]))
     for node in nodes.values():
         node["unresolved"] = sorted(set(node["unresolved"]))
         node["runtime_parameters"] = parameterize(node.get("compiled_sql"), parameter_columns, dialect)[1]
