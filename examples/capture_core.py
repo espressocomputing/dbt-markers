@@ -305,6 +305,13 @@ def capture(request):
             blocked("column_metadata_missing:" + str(relation))
         return [self.Column.create(column["name"], column["data_type"]) for column in relations[name]["columns"]]
 
+    def query_columns(self, sql):
+        query = sqlglot.parse_one(sql, read=adapter_type)
+        metadata = generated_catalog.describe_query(query)
+        if metadata is None:
+            blocked("query_column_metadata_required")
+        return [self.Column.create(column["name"], column["data_type"]) for column in metadata]
+
     def no_open(cls, connection):
         blocked("connection_open_forbidden")
 
@@ -370,6 +377,7 @@ def capture(request):
     adapter.list_schemas = list_schemas
     adapter.list_relations_without_caching = list_relations
     adapter.get_columns_in_relation = columns
+    adapter.get_column_schema_from_query = query_columns
     def check_schema(self, database, schema):
         relation = self.Relation.create(database=database, schema=schema, quote_policy=self.config.quoting).without_identifier()
         database, schema = relation_key(sqlglot.parse_one(str(relation), read=adapter_type, into=exp.Table))

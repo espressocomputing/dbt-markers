@@ -73,7 +73,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None,
             sql = node.get("raw_code")
         if kind in EXECUTABLE and not sql:
             reasons.append("compiled_sql_unavailable")
-        if kind not in {"model", "test", "source", "operation"}:
+        if kind not in {"model", "test", "source", "operation"} and not (kind == "check" and context.get("native_checks_passed")):
             reasons.append("unsupported_resource_type:" + kind)
         if kind == "model" and config.get("materialized") not in {"view", "table", "ephemeral"}:
             reasons.append("runtime_materialization:" + str(config.get("materialized")))
@@ -92,6 +92,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None,
                 reasons.append("execution_capture_incomplete")
         record = {
             "resource_type": kind,
+            "execution_scope": "local_validation" if kind == "check" else "warehouse",
             "generated_statements": generated,
             "sql_generation_complete": generation_complete,
             "package_name": node.get("package_name"),
@@ -124,6 +125,10 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None,
     execution, execution_selected = execution_edges(nodes, selected, context.get("command", "build"), manifest["metadata"]["project_name"])
     parameter_columns = context.get("runtime_parameter_columns", {})
     dialect = DIALECTS.get(manifest["metadata"]["adapter_type"])
+    if context.get("native_checks_passed"):
+        checks = [key for key, node in nodes.items() if node["resource_type"] == "check"]
+        execution.extend({"from": key, "to": target, "kind": "local_validation_gate"} for key in checks for target in selected if target != key)
+        execution_selected = sorted(set(execution_selected) | set(checks))
     for node in nodes.values():
         node["unresolved"] = sorted(set(node["unresolved"]))
         node["runtime_parameters"] = parameterize(node.get("compiled_sql"), parameter_columns, dialect)[1]
@@ -263,6 +268,7 @@ def compile_plan(args):
         results = json.loads((root / "run_results.json").read_text())
         context = {"target": args.target, "profile": args.profile, "vars_hash": digest(args.vars),
                    "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context,
+                   "native_checks_passed": native_checks is not None,
                    "runtime_parameter_columns": dict(item.split("=", 1) for item in getattr(args, "runtime_parameter_column", [])),
                    "command": args.command, "default_database": args.default_database, "default_schema": args.default_schema}
         capture = None
