@@ -276,7 +276,7 @@ def compile_plan(args):
             request_path.chmod(0o600)
             subprocess.run([str(args.capture_python.absolute()), str(Path(__file__).with_name("capture_core.py")), "--request", str(request_path), "--output", str(capture_path)], cwd=project, capture_output=True, text=True, check=True)
             capture = json.loads(capture_path.read_text())
-            context["warehouse_state_hash"] = digest(state)
+            context["warehouse_state_hash"] = digest({key: value for key, value in state.items() if key != "collected_at"})
             context["capture_versions"] = capture["versions"]
             captured_manifest_path = capture_dir / "manifest.json"
             if captured_manifest_path.exists():
