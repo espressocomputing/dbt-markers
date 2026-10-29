@@ -175,7 +175,7 @@ acknowledgment from Nitro. No model-completion events or run results are sent.
 
 ## Compiled planning prototype (unmerged)
 
-`examples/plan.py` writes `dbt_markers.plan.v2` under `dbt_plan` for Nitro's
+`examples/plan.py` writes `dbt_markers.plan.v3` under `dbt_plan` for Nitro's
 future configuration interface. Nodes contain **full compiled SQL**, source,
 configuration, relation identity, declared and SQL-derived dependencies, and
 SHA-256 fingerprints. Optional Core capture adds full materialization/hook SQL
@@ -213,6 +213,31 @@ SQL, config, dependencies and macro bodies. Metadata snapshots and parser versio
 also participate in invalidation. `changes` propagates changes through both old
 and new data/execution edges, including deleted nodes and tests. This is a
 conservative invalidation set, **not permission to skip execution**.
+
+### Stable comparison and coverage
+
+The default comparison retains every literal. For explicitly designated runtime
+output columns, add:
+
+```sh
+  --runtime-parameter-column dbt_batch_id=invocation_id \
+  --runtime-parameter-column dbt_batch_ts=run_started_at
+```
+
+This is a caller-declared parameter contract, not automatic proof of a literal's
+origin. Only string literals (optionally cast) directly assigned to those aliases
+are parameterized; expressions are rejected. Other occurrences of the same value,
+filters and business literals remain significant. Exact SQL and values remain in
+the plan. `fingerprint` verifies the exact node; `comparison_fingerprint` and graph
+hashes use the parameterized comparison. `runtime_parameters` records source spans
+and values for compiled bodies. These templates are comparison representations,
+not SQL ready to execute. Nitro must supply the new run's values when substituting
+execution. A plan-v2 baseline cannot be compared with plan v3.
+
+`coverage.compiled_bodies` lists available/missing SQL bodies, while
+`coverage.materialization_sql` separates conditionally generated work from work
+not captured. Unresolved selected dependencies remain explicit. Test SQL generation
+does not prove a passing test, and all plans require runtime validation.
 
 ### Offline materialization capture
 
@@ -253,7 +278,22 @@ the SHA-256 of the exact captured CREATE SQL to the column list; capture does no
 invent expression types. Optional `query_results` maps exact stripped SQL to
 `{"columns": [...], "rows": [[...]], "kind": "metadata"}`. Only use that kind for
 metadata queries; data results default to `data` and retain their lineage.
-There is no automatic warehouse snapshot collector yet.
+`examples/snowflake_catalog.py` collects live standard table/view metadata using
+Snowflake's connector. Run it with the same user/role as dbt:
+
+```sh
+python examples/snowflake_catalog.py --schemas schemas.json --output warehouse-state.json
+```
+
+`schemas.json` maps actual, case-sensitive database names to schema-name arrays.
+`SNOWFLAKE_CONNECTION_JSON` contains connector options (or choose another variable
+with `--connection-env`); no credentials are written to the snapshot. It reads
+schema existence, relation types/transience, and exact column types. Uncollected
+schemas have `relations: null`, which blocks capture rather than pretending they
+are empty. Unsupported object types and potentially truncated SHOW results fail.
+Snapshots include connection identity and collection time; collection time alone
+does not invalidate the plan. Collection is not an atomic catalog snapshot, and
+catalog/input state still needs validation before execution.
 
 Unknown results are lazy: discarded results allow generation to continue, but
 reading rows, column metadata or response values stops with an explicit blocker.
