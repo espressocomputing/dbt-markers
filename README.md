@@ -251,8 +251,11 @@ Add these options using Python from the same dbt Core environment:
 That environment also needs SQLGlot (verified with 30.25.0). Capture is verified
 on Core 1.12.6 with Snowflake 1.12.4 and DuckDB 1.11.1. The ordinary compiled
 planner also has Core 1.6 and v2 smoke coverage; the internal Core capture hooks
-are **not a stable cross-version plugin API**. Native v2 and remote dbt Cloud
-capture are not supported or verified. Existing marker packaging is unchanged.
+are **not a stable cross-version plugin API**. Capture is not installed inside
+native v2 or dbt Cloud. Separately, its generated SQL was compared with a real
+managed Cloud TPC-H build: all 59 workload statements matched after declared
+parameter/comment/format normalization. See [Cloud evidence](compatibility/cloud-plan-results.json).
+Existing marker packaging is unchanged.
 
 Capture runs dbt's real materialization macros with standard adapter connection
 opening disabled. Relation/schema/column introspection uses an explicit snapshot:
@@ -314,7 +317,10 @@ Capture is for trusted projects using the standard adapters. It is not a securit
 sandbox for arbitrary Python/custom plugins that open their own connections.
 Python models, hidden stored-procedure/UDF dependencies, runtime-dependent hook
 branches, missing metadata and results remain explicit limits. The preceding
-whole-project compile is a normal dbt compile, not offline capture.
+whole-project compile is a normal dbt compile, not offline capture. Compile-time
+database reads are not traced, and native-v2 local check gates are not verified;
+`coverage` records both limits. An end hook that reads execution `results` blocks
+capture instead of consuming synthetic reporting values.
 
 `--require-complete` rejects unresolved selected compilation/lineage; it does not
 certify a complete wire trace. `execution_sql_complete`, `input_state_verified`
@@ -322,6 +328,9 @@ and `execution_reuse_authorized` stay false. Nitro must check inputs and actual
 runtime SQL before reuse. This prototype writes JSON; it does not build the fused
 megaquery, transmit a plan through the marker hook, or integrate with a Nitro
 consumer. Keep this PR unmerged pending those acceptance requirements.
+
+The [public-project survey](compatibility/public-project-survey.md) describes
+which recurring patterns fit this scope and which still require runtime fallback.
 
 ## Privacy
 

@@ -51,7 +51,6 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
         raise ValueError("Selected resources missing from manifest")
     macros = manifest.get("macros", {})
     nodes = {}
-    captured = {item["node_id"]: item for item in capture["node_results"]} if capture else {}
     for key, node in sorted(resources.items()):
         kind = node["resource_type"]
         dependencies = sorted(node.get("depends_on", {}).get("nodes", []))

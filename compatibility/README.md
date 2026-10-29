@@ -132,3 +132,33 @@ some adapter metadata methods are replaced by snapshot lookups.
 Capture uses internal Core APIs and has only the version coverage stated above.
 It is not verified on Cloud or native v2. Neither input freshness, full wire SQL,
 query-history matching nor a Nitro consumer is certified by these checks.
+
+## Plan v3 / full TPC-H Cloud verification
+
+[Cloud results](cloud-plan-results.json) record run 522734158 on managed version
+2026.10.26+27787ee. The isolated `kuza/compiled-plan-canary` branch of dbt-tpch
+ran compile → build → compile over the complete original workload: 24 models
+(8 ephemeral, 16 tables), 43 tests and 8 sources. All 16 models built and all 43
+tests passed. Both compilations produced equal comparison graph hashes after
+explicitly declaring `dbt_batch_id` and `dbt_batch_ts` as invocation parameters.
+Original SQL and actual parameter values remain in the plan.
+
+Snowflake query history supplied 59 model/test-attributed workload statements.
+All 16 CTAS bodies and all 43 test bodies matched the upfront Cloud compilation.
+All 59 full statements also matched local Core 1.12.6 / Snowflake 1.12.4 offline
+capture after comment/format normalization and the two declared parameters.
+The live catalog collector read both the initial target and the populated target;
+capture against the latter generated all 16 model statements without blockers.
+The temporary database, job, environment, credentials and extended attributes
+were removed after evidence collection. No production job was modified.
+
+This validates this project's workload, not every connection/setup statement,
+every Cloud release or runtime installation of the capture shim in Cloud.
+No Nitro consumer exists yet; plan equality does not establish input freshness.
+
+Plan v3 also passed the 17 Core 1.12.6 planning cases and 15 local tests. Eleven
+real-adapter offline capture cases passed, including the existing unquoted-schema
+regression and blocking end hooks that read synthetic execution results.
+See the [six-repository public-project survey](public-project-survey.md) for
+additional coverage boundaries; that survey is static inspection, not a claim
+that all those projects execute successfully through this planner.
