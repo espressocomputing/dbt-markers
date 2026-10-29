@@ -262,13 +262,23 @@ def compile_plan(args):
         if args.full_refresh:
             command.append("--full-refresh")
         # Compile the whole project; selection is an independent execution mask.
-        subprocess.run(command, cwd=project, capture_output=True, text=True, check=not getattr(args, "allow_partial", False))
+        compiled = subprocess.run(command, cwd=project, capture_output=True, text=True, check=not getattr(args, "allow_partial", False))
         root = Path(temp)
+        compilation_scope = "whole_project"
+        if compiled.returncode:
+            if not args.select:
+                raise ValueError("Partial compilation requires an explicit --select for the component to retain")
+            root = root / "selected-component"
+            selected_command = list(command)
+            selected_command[selected_command.index("--target-path") + 1] = str(root)
+            subprocess.run([*selected_command, *selection], cwd=project, capture_output=True, text=True, check=True)
+            compilation_scope = "selected_component"
         manifest = json.loads((root / "manifest.json").read_text())
         results = json.loads((root / "run_results.json").read_text())
         context = {"target": args.target, "profile": args.profile, "vars_hash": digest(args.vars),
                    "full_refresh": args.full_refresh, "warehouse_context": args.warehouse_context,
                    "native_checks_passed": native_checks is not None,
+                   "compilation_scope": compilation_scope,
                    "runtime_parameter_columns": dict(item.split("=", 1) for item in getattr(args, "runtime_parameter_column", [])),
                    "command": args.command, "default_database": args.default_database, "default_schema": args.default_schema}
         capture = None
@@ -319,6 +329,9 @@ def compile_plan(args):
             raise ValueError("--warehouse-state requires --capture-python")
         plan = make_plan(manifest, results, selected, context, previous, capture, allow_partial=getattr(args, "allow_partial", False))
         plan["coverage"]["native_v2_check_gates"] = native_checks or "not_verified"
+        plan["coverage"]["compilation_scope"] = compilation_scope
+        if compilation_scope == "selected_component":
+            plan["compilation_errors"]["whole_project"] = compiled.stdout + compiled.stderr
         if args.require_complete and not plan["compiled_selection_complete"]:
             raise ValueError("Selected plan has unresolved nodes/context: " + json.dumps({"nodes": plan["unresolved_nodes"], "context": plan["unresolved_context"]}))
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -352,7 +365,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--require-complete", action="store_true")
-    parser.add_argument("--allow-partial", action="store_true", help="Keep independently compiled nodes after a compile failure; retain failed nodes and affected dependencies as unresolved")
+    parser.add_argument("--allow-partial", action="store_true", help="Retry only the explicit selected component if whole-project compilation fails; preserve missing bodies as unresolved")
     args = parser.parse_args()
     try:
         plan = compile_plan(args)
