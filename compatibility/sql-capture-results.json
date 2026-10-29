@@ -1,0 +1,59 @@
+{
+  "schema": "dbt_markers.sql_capture.v1",
+  "artifact_export": {
+    "dbt_core_1_12_6": [
+      "baseline",
+      "repeat",
+      "partial_component",
+      "vars_edit",
+      "selection_edit",
+      "incremental_body",
+      "hooks_preserved"
+    ],
+    "dbt_core_1_6_0": [
+      "baseline",
+      "repeat",
+      "partial_component"
+    ],
+    "dbt_native_2_0_9": [
+      "baseline",
+      "repeat",
+      "partial_component"
+    ]
+  },
+  "offline_capture_cases": [
+    "table_view_hooks",
+    "existing_unquoted_schema",
+    "incremental_missing_projection_metadata",
+    "incremental_append",
+    "seed",
+    "unit_missing_projection_metadata",
+    "unit_query",
+    "unit_conditional_downstream",
+    "end_hook_results_blocked",
+    "data_result_blocked",
+    "response_blocked",
+    "metadata_blocked"
+  ],
+  "unit_tests": 10,
+  "export_imports_without_site_packages": true,
+  "removed_client_features": [
+    "computed hashes",
+    "SQL parameter normalization",
+    "physical lineage inference",
+    "execution gate inference",
+    "cross-run comparison",
+    "change propagation"
+  ],
+  "retained_parser_use": "Core materialization metadata resolution only",
+  "cloud_rerun_for_new_export_format": false,
+  "combined_export_and_capture": {
+    "adapter": "DuckDB 1.11.1",
+    "dbt_core": "1.12.6",
+    "adapter_submissions": 18,
+    "generation_completed": true,
+    "separate_compile_and_capture_invocation_sql_preserved": true,
+    "submission_sequence_preserved": true,
+    "missing_catalog_results_reported_as_blockers": true
+  }
+}

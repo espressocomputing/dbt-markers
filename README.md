@@ -173,6 +173,89 @@ warehouse query history. If statements reach Snowflake, they execute ordinary
 `select 1` queries. Hook query failures abort the run; there is no separate receipt
 acknowledgment from Nitro. No model-completion events or run results are sent.
 
+## SQL capture prototype (unmerged)
+
+`examples/plan.py` now writes `dbt_markers.sql_capture.v1` under `dbt_capture`.
+The filename is retained, but the client captures evidence rather than planning
+reuse. It emits no computed fingerprints, SQL normalization, physical lineage,
+change propagation, inferred execution gates or reuse decisions. Those belong in
+Nitro. Earlier plan-v3 artifacts and comparison CLI options are no longer used.
+
+```sh
+python examples/plan.py --dbt /path/to/dbt \
+  --project-dir /path/to/project --profiles-dir /path/to/profiles \
+  --command build --warehouse-context account/role \
+  --output capture.json
+```
+
+The artifact preserves the full dbt manifest and run results, selected resource
+IDs and invocation context. This includes original compiled SQL, raw code,
+macro bodies, declared dependencies, configs, hooks and dbt-provided checksums.
+The client does not compute hashes. Full manifests and vars can contain sensitive
+project content; this is an explicit artifact export for a trusted consumer.
+Basic compilation/export needs no SQL parser.
+
+### Materialization SQL
+
+Add `--capture-python /path/to/core/bin/python --warehouse-state state.json` to
+capture real adapter submissions, including exact SQL and bound parameters.
+The capture environment needs SQLGlot (verified on 30.25.0). SQLGlot is used only
+for metadata resolution during materialization generation, not to analyze the DAG
+or rewrite exported workload SQL. Capture is verified on Core 1.12.6 with
+Snowflake 1.12.4 and DuckDB 1.11.1; its internal hooks are not a stable Core API.
+The ordinary artifact exporter also has Core 1.6 and native-v2 coverage.
+
+The ordered trace records adapter submission order, node attribution, generation
+phase and metadata lookups. It is not a claim about runtime scheduling or driver
+wire SQL. Query comments are omitted; some metadata calls use supplied snapshots.
+Captured manifests and run results are preserved separately from the preceding
+compile artifacts. Internal capture results are synthetic and never evidence of
+successful execution. Actual SQL generation blockers and conditional test gates
+are retained for server-side interpretation.
+
+`examples/snowflake_catalog.py --schemas schemas.json --output state.json` reads
+standard table/view metadata using connector options in
+`SNOWFLAKE_CONNECTION_JSON`. `schemas.json` maps database names to schema arrays.
+Use the same identity as dbt. Missing catalog scopes block capture.
+
+For new relations, `derived_columns` in the state maps **exact CREATE SQL strings**
+to column lists (older SHA-256 keys are no longer accepted). Alternatively,
+`--describe-connection-env SNOWFLAKE_CONNECTION_JSON` uses Snowflake connector
+`cursor.describe` without executing model SQL. Generated upstream SELECTs are
+expanded for metadata description; exported workload SQL stays unchanged.
+Unsupported structured types fail rather than receiving invented types.
+Live description reports `offline: false` and `workload_executed: false`.
+
+Standard incrementals, schema evolution and snapshots can generate SQL upfront.
+Sequential microbatch requires `concurrent_batches: false` and accepts explicit
+`--event-time-start` / `--event-time-end`. Unknown result-value or response reads
+block generation. `--plan-through-test-gates` allows downstream generation under
+an explicit tests-pass condition, without reporting tests as having passed.
+End hooks cannot consume synthetic execution results.
+
+`--validate-native-checks` runs actual `dbt check` and includes its receipt;
+failure aborts export. `--allow-partial --select ...` can retain an independent
+component after whole-project compilation fails. Capture can also compile against
+future relation schemas. Missing bodies and original errors remain explicit.
+`--require-complete` requires successful conditional SQL generation when capture
+is enabled; otherwise it requires bodies in the selected declared dependency
+closure. Seeds and unit-test materializations can produce adapter SQL without a
+standalone compiled body. It does not
+certify physical lineage, input freshness or complete wire SQL.
+
+The preceding normal dbt compile can access the warehouse; its database reads
+are not traced. Capture assumes trusted projects using standard adapters. Python
+models, arbitrary catalog mutations, result-dependent SQL, parallel microbatch,
+other adapters/versions and hidden procedure dependencies remain limits. The
+server must interpret these gaps; no Nitro consumer or capture transport exists.
+This PR remains unmerged.
+
+Historical [Cloud evidence](compatibility/cloud-plan-results.json) compares all
+59 TPC-H workload statements to generated SQL. [Expanded live evidence](compatibility/expanded-capture-results.json)
+adds 32 incremental and three snapshot statements. These validate SQL generation,
+not the removed client comparison logic or a running Nitro integration. The
+[public-project survey](compatibility/public-project-survey.md) is static evidence.
+
 ## Privacy
 
 The comment is stored in your warehouse's query history, and anyone who can

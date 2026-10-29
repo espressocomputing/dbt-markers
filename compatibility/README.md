@@ -1,3 +1,22 @@
+## Current capture contract
+
+[Current export verification](sql-capture-results.json) records the capture-only
+contract checks, separately from historical planning evidence.
+
+The client now exports `dbt_markers.sql_capture.v1` (`dbt_capture`): original
+manifests/run results, exact SQL and bindings, selected IDs, invocation context,
+catalog inputs and explicit generation gaps. Comparison, hashes, parameter
+normalization, inferred physical lineage and execution gates were removed.
+The sections below record historical prototype verification; their plan/hash
+assertions are not the current interface. SQL-generation comparisons remain
+useful evidence.
+
+`compatibility/planning.py` retains its filename but now tests artifact export,
+exact compiled strings, declared dependencies, selected-component recovery,
+vars, selection, incremental bodies and hook preservation. It no longer tests
+server-side planning. `compatibility/capture.py` still exercises real Core adapter
+capture; explicit derived-column fixtures now use exact CREATE SQL keys.
+
 # Compatibility verification
 
 The package supports dbt `>=1.6.0,<3.0.0`. The sweep tests non-yanked stable
@@ -86,3 +105,100 @@ nodes in each canary graph carried raw source matching the manifest, including
 singular and generic tests. None carried nonempty compiled code at `on-run-start`.
 Each graph still used one metadata query. Core 1.6 used the compatible environment
 described above. Cloud was not rerun for the query-text change.
+
+## Compiled planner prototype
+
+Run `python3 compatibility/planning.py --dbt /path/to/dbt --directory /new/path`.
+The suite uses real dbt compilation and warehouse fixtures, without mocking dbt.
+Core 1.12.6 passed 17 plan scenarios: stable repeat, model/macro/variable edits,
+selection changes, ephemeral expansion, relation changes, test edits/removal,
+rewiring/deletion, incremental and hook handling, unit-test handling, warehouse
+identity changes, and input-data changes. Strict unresolved plans, empty selection,
+and corrupted prior plans were rejected without writing output. Core 1.6.0 (with
+the previously documented compatible dependencies) and v2 2.0.9 passed baseline
+and repeat smoke checks. The eight existing marker/decoder tests also passed.
+
+The plans contain full compiled model/test query bodies as well as fingerprints.
+These checks do not establish exact materialization SQL, input freshness, Cloud
+compatibility, or a working Nitro integration. The planner remains a draft.
+
+### Plan v2 and offline SQL capture
+
+Plan v2 adds SQL-derived physical dependencies and separate execution edges for
+hooks, build tests and unit tests. The 17 Core 1.12.6 planning scenarios passed
+again, as did Core 1.6.0 and native v2 2.0.9 baseline/repeat smoke checks. Fourteen
+local tests cover transport plus lineage, CTE/quoted identifier resolution,
+prior-state DML reads, temporary relations, test gates and hook ordering.
+The Python running planning checks now needs SQLGlot 30.x.
+
+Run `python compatibility/capture.py --python /path/to/core/python --directory /new/path`.
+On Core 1.12.6 / Snowflake 1.12.4 / SQLGlot 30.25.0, all nine offline cases passed:
+table/view plus hooks, incremental projection metadata missing/supplied, bound
+seed inserts, unit-test projection metadata missing/full SQL generated, data-result
+read blocked, statement-response read blocked, and missing metadata blocked.
+These use the real Snowflake adapter/macros with connection opening prohibited;
+they do not execute against Snowflake. Full unit-test SQL is captured without
+pretending the unknown outcome passed.
+
+A separate DuckDB 1.11.1 local canary supplied metadata read from its actual
+warehouse, captured `run --select a+`, then executed that command. All 17
+model-attributed adapter statements across three models matched the real SQL log
+after comment removal and SQL formatting normalization, including transactions,
+CREATE, RENAME and DROP. Capture had left only the original input table in the
+warehouse before the real run. Setup/introspection SQL is not a complete match:
+some adapter metadata methods are replaced by snapshot lookups.
+
+Capture uses internal Core APIs and has only the version coverage stated above.
+The capture shim itself is not installed in Cloud or native v2. Neither input freshness, full wire SQL,
+query-history matching nor a Nitro consumer is certified by these checks.
+
+## Plan v3 / full TPC-H Cloud verification
+
+[Cloud results](cloud-plan-results.json) record run 522734158 on managed version
+2026.10.26+27787ee. The isolated `kuza/compiled-plan-canary` branch of dbt-tpch
+ran compile → build → compile over the complete original workload: 24 models
+(8 ephemeral, 16 tables), 43 tests and 8 sources. All 16 models built and all 43
+tests passed. Both compilations produced equal comparison graph hashes after
+explicitly declaring `dbt_batch_id` and `dbt_batch_ts` as invocation parameters.
+Original SQL and actual parameter values remain in the plan.
+
+Snowflake query history supplied 59 model/test-attributed workload statements.
+All 16 CTAS bodies and all 43 test bodies matched the upfront Cloud compilation.
+All 59 full statements also matched local Core 1.12.6 / Snowflake 1.12.4 offline
+capture after comment/format normalization and the two declared parameters.
+The live catalog collector read both the initial target and the populated target;
+capture against the latter generated all 16 model statements without blockers.
+The temporary database, job, environment, credentials and extended attributes
+were removed after evidence collection. No production job was modified.
+
+This validates this project's workload, not every connection/setup statement,
+every Cloud release or runtime installation of the capture shim in Cloud.
+No Nitro consumer exists yet; plan equality does not establish input freshness.
+
+Plan v3 also passed the 17 Core 1.12.6 planning cases and 15 local tests. Eleven
+real-adapter offline capture cases passed, including the existing unquoted-schema
+regression and blocking end hooks that read synthetic execution results.
+See the [six-repository public-project survey](public-project-survey.md) for
+additional coverage boundaries; that survey is static inspection, not a claim
+that all those projects execute successfully through this planner.
+
+
+## Metadata-backed generation and conditional gates
+
+[Expanded results](expanded-capture-results.json) record eight live Snowflake
+incremental cases: 32 DDL/DML statements matched actual execution, and capture
+left target data unchanged. Initial/existing snapshots matched three more
+statements. Microbatch uses an explicit window and sequential batches;
+parallel batches are rejected. Reproduce with `python compatibility/strategies.py
+--python /path/to/core/python --database NEW_DISPOSABLE_DATABASE
+--directory /new/artifact/path --connection-env SNOWFLAKE_CONNECTION_JSON`.
+The harness creates and drops its own database.
+
+Metadata-backed capture uses connector description without executing workloads.
+Additional cases cover generated upstream schema introspection, conditional
+data/unit test gates, stored failures, schema-only result access, blocking row
+reads, native-v2 passing/failing checks and independent component recovery.
+The offline suite now has 12 cases; local unit coverage has 16 tests. Full Core
+planning passed 17 cases, with partial recovery added to smoke coverage.
+Arbitrary adapters, catalog mutations, structured types, runtime telemetry and
+Nitro integration remain outside this verification.

@@ -1,0 +1,65 @@
+{
+  "dbt_core": "1.12.6",
+  "snowflake_adapter": "1.12.4",
+  "incremental_cases": {
+    "merge": {
+      "matching_ddl_dml_statements": 3,
+      "schema_descriptions": 1,
+      "capture_changed_data": false
+    },
+    "delete+insert": {
+      "matching_ddl_dml_statements": 4,
+      "schema_descriptions": 1,
+      "capture_changed_data": false
+    },
+    "append": {
+      "matching_ddl_dml_statements": 3,
+      "schema_descriptions": 1,
+      "capture_changed_data": false
+    },
+    "insert_overwrite": {
+      "matching_ddl_dml_statements": 3,
+      "schema_descriptions": 1,
+      "capture_changed_data": false
+    },
+    "append_new_columns": {
+      "matching_ddl_dml_statements": 4,
+      "schema_descriptions": 1,
+      "capture_changed_data": false
+    },
+    "sync_all_columns": {
+      "matching_ddl_dml_statements": 5,
+      "schema_descriptions": 1,
+      "capture_changed_data": false
+    },
+    "full_refresh": {
+      "matching_ddl_dml_statements": 2,
+      "schema_descriptions": 0,
+      "capture_changed_data": false
+    },
+    "microbatch": {
+      "matching_ddl_dml_statements": 8,
+      "schema_descriptions": 1,
+      "capture_changed_data": false
+    }
+  },
+  "snapshot_matching_statements": {
+    "initial": 1,
+    "existing": 2
+  },
+  "additional_verified_cases": [
+    "conditional data-test and unit-test downstream generation",
+    "stored test failures",
+    "column names without row reads",
+    "row-value reads blocked",
+    "generated upstream column introspection despite failed whole-project compile",
+    "native v2 2.0.9 passing and failing local checks",
+    "independent selected component after unrelated compile failure"
+  ],
+  "limits": [
+    "sequential microbatch only, explicit event window",
+    "adapter submissions normalized for comments and formatting, not full driver wire trace",
+    "new cases verified on local Core against live Snowflake, not rerun in Cloud",
+    "no input freshness or Nitro reuse authorization"
+  ]
+}

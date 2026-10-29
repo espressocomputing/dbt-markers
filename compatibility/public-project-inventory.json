@@ -1,0 +1,246 @@
+{
+  "survey_date": "2026-10-28",
+  "method": "Static source-file inspection, not compiled node counts or project compatibility tests. Pattern counts include comments unless explicitly called direct; macro expansion and config inheritance can add dependencies.",
+  "repositories": {
+    "jaffle-shop": {
+      "sha": "5beb145b00f5465ec759cfcdd9745e858818cf95",
+      "commit_date": "2026-09-15",
+      "model_sql_files": 13,
+      "model_python_files": 0,
+      "snapshot_sql_files": 0,
+      "pattern_files": {
+        "incremental": 0,
+        "run_query": 0,
+        "statement": 0,
+        "catalog": 0,
+        "data_driven": 0,
+        "runtime_metadata": 0,
+        "hooks": 0
+      },
+      "examples": {
+        "incremental": [],
+        "run_query": [],
+        "statement": [],
+        "catalog": [],
+        "data_driven": [],
+        "runtime_metadata": [],
+        "hooks": []
+      }
+    },
+    "data-infra": {
+      "sha": "472c85e696ec2f8532d0ea90c9edb28069701fa9",
+      "commit_date": "2026-10-28",
+      "model_sql_files": 626,
+      "model_python_files": 0,
+      "snapshot_sql_files": 0,
+      "pattern_files": {
+        "incremental": 3,
+        "run_query": 0,
+        "statement": 0,
+        "catalog": 3,
+        "data_driven": 5,
+        "runtime_metadata": 8,
+        "hooks": 15
+      },
+      "examples": {
+        "incremental": [
+          "warehouse/models/staging/audit/stg_audit__cloudaudit_googleapis_com_data_access.sql",
+          "warehouse/models/mart/audit/fct_bigquery_data_access.sql",
+          "warehouse/macros/incremental_filter_ranged.sql"
+        ],
+        "run_query": [],
+        "statement": [],
+        "catalog": [
+          "warehouse/models/intermediate/gtfs_quality/int_gtfs_quality__schedule_validator_rule_details_unioned.sql",
+          "warehouse/models/intermediate/gtfs_quality/int_gtfs_quality__guideline_checks_long.sql",
+          "warehouse/macros/rt_sampled_where_clause.sql"
+        ],
+        "data_driven": [
+          "warehouse/models/intermediate/payments/int_payments__dim_product_data.sql",
+          "warehouse/models/intermediate/gtfs_quality/guidelines_checks/int_gtfs_quality__trip_id_alignment.sql",
+          "warehouse/models/mart/gtfs/dim_schedule_feeds.sql",
+          "warehouse/models/mart/payments/indexes/payments_tests_weekly_date_spine.sql",
+          "warehouse/models/mart/payments/indexes/payments_tests_weekly_date_spine_enghouse.sql"
+        ],
+        "runtime_metadata": [
+          "warehouse/models/intermediate/ntd_validation/int_ntd_rr20_financial_total_exp.sql",
+          "warehouse/models/intermediate/ntd_validation/int_ntd_rr20_service_1alldata.sql",
+          "warehouse/models/intermediate/ntd_validation/int_ntd_rr20_financial_specific_funds.sql",
+          "warehouse/models/intermediate/ntd_validation/int_ntd_rr20_service_3ratios_wide.sql",
+          "warehouse/models/intermediate/ntd_validation/int_ntd_a10_facilitiesdata.sql"
+        ],
+        "hooks": [
+          "warehouse/models/mart/payments/fct_payments_settlements_enghouse.sql",
+          "warehouse/models/mart/payments/fct_payments_deposit_transactions.sql",
+          "warehouse/models/mart/payments/fct_payments_rides_v2.sql",
+          "warehouse/models/mart/payments/fct_payments_aggregations.sql",
+          "warehouse/models/mart/payments/fct_payments_adjustment_transactions.sql"
+        ]
+      },
+      "direct_incremental_model_files": 62,
+      "microbatch_model_files": 47,
+      "insert_overwrite_model_files": 13
+    },
+    "dbt_artifacts": {
+      "sha": "16662c081b64da17651b811135eff82b3bfd405b",
+      "commit_date": "2026-09-23",
+      "model_sql_files": 46,
+      "model_python_files": 0,
+      "snapshot_sql_files": 0,
+      "pattern_files": {
+        "incremental": 0,
+        "run_query": 1,
+        "statement": 1,
+        "catalog": 2,
+        "data_driven": 0,
+        "runtime_metadata": 90,
+        "hooks": 0
+      },
+      "examples": {
+        "incremental": [],
+        "run_query": [
+          "macros/upload_results/insert_into_metadata_table.sql"
+        ],
+        "statement": [
+          "macros/migration/migrate_from_v0_to_v1.sql"
+        ],
+        "catalog": [
+          "macros/database_specific_helpers/get_relation.sql",
+          "macros/upload_results/insert_into_metadata_table.sql"
+        ],
+        "data_driven": [],
+        "runtime_metadata": [
+          "models/dim_dbt__tests.yml",
+          "models/fct_dbt__test_executions.sql",
+          "models/dim_dbt__current_models.yml",
+          "models/dim_dbt__tests.sql",
+          "models/fct_dbt__flaky_tests_detail.yml"
+        ],
+        "hooks": []
+      }
+    },
+    "dbt-project-evaluator": {
+      "sha": "8b505558ed3865debb5cf0fe12ba6b313425e8f0",
+      "commit_date": "2026-10-26",
+      "model_sql_files": 0,
+      "model_python_files": 0,
+      "snapshot_sql_files": 0,
+      "pattern_files": {
+        "incremental": 0,
+        "run_query": 0,
+        "statement": 0,
+        "catalog": 0,
+        "data_driven": 0,
+        "runtime_metadata": 0,
+        "hooks": 0
+      },
+      "examples": {
+        "incremental": [],
+        "run_query": [],
+        "statement": [],
+        "catalog": [],
+        "data_driven": [],
+        "runtime_metadata": [],
+        "hooks": []
+      },
+      "native_check_sql_files": 28
+    },
+    "dbt-data-reliability": {
+      "sha": "e3ab23d8c2e3bd7ad455de8bb1d23bf7ee84e675",
+      "commit_date": "2026-10-12",
+      "model_sql_files": 30,
+      "model_python_files": 0,
+      "snapshot_sql_files": 0,
+      "pattern_files": {
+        "incremental": 1,
+        "run_query": 30,
+        "statement": 2,
+        "catalog": 15,
+        "data_driven": 1,
+        "runtime_metadata": 16,
+        "hooks": 17
+      },
+      "examples": {
+        "incremental": [
+          "macros/utils/table_operations/delete_if_incremental.sql"
+        ],
+        "run_query": [
+          "macros/commands/create_indexes.sql",
+          "macros/commands/dump_table.sql",
+          "macros/commands/delete_duplicate_rows.sql",
+          "macros/commands/fix_nanosecond_timing_values.sql",
+          "macros/utils/run_queries/run_query.sql"
+        ],
+        "statement": [
+          "macros/materializations/non_dbt.sql",
+          "macros/utils/table_operations/replace_table_data.sql"
+        ],
+        "catalog": [
+          "macros/commands/generate_schema_baseline_test.sql",
+          "macros/commands/dump_table.sql",
+          "macros/commands/delete_duplicate_rows.sql",
+          "macros/utils/graph/get_elementary_relation.sql",
+          "macros/utils/graph/column_exists_in_relation.sql"
+        ],
+        "data_driven": [
+          "macros/edr/materializations/test/test_result.sql"
+        ],
+        "runtime_metadata": [
+          "models/run_results.yml",
+          "models/edr/dbt_artifacts/dbt_invocations.sql",
+          "models/edr/alerts/alerts_dbt_models.sql",
+          "models/edr/run_results/job_run_results.sql",
+          "models/edr/run_results/seed_run_results.sql"
+        ],
+        "hooks": [
+          "models/run_results.yml",
+          "models/elementary_tests.yml",
+          "models/edr/dbt_artifacts/dbt_snapshots.sql",
+          "models/edr/dbt_artifacts/dbt_tests.sql",
+          "models/edr/dbt_artifacts/dbt_metrics.sql"
+        ]
+      }
+    },
+    "dbt_shopify": {
+      "sha": "56ee0ff062e47aa751da77d6b76e42689f2e69e4",
+      "commit_date": "2026-10-28",
+      "model_sql_files": 264,
+      "model_python_files": 0,
+      "snapshot_sql_files": 0,
+      "pattern_files": {
+        "incremental": 4,
+        "run_query": 0,
+        "statement": 0,
+        "catalog": 105,
+        "data_driven": 2,
+        "runtime_metadata": 0,
+        "hooks": 0
+      },
+      "examples": {
+        "incremental": [
+          "models/rest/shopify__customer_cohorts.sql",
+          "models/rest/shopify__customer_email_cohorts.sql",
+          "models/graphql/shopify_gql__customer_cohorts.sql",
+          "models/graphql/shopify_gql__customer_email_cohorts.sql"
+        ],
+        "run_query": [],
+        "statement": [],
+        "catalog": [
+          "models/rest/shopify__daily_shop.sql",
+          "models/rest/shopify__customer_emails.sql",
+          "models/rest/shopify__inventory_levels.sql",
+          "models/rest/shopify__customers.sql",
+          "models/graphql/shopify_gql__customer_emails.sql"
+        ],
+        "data_driven": [
+          "macros/pivot_metafields.sql",
+          "macros/get_metafields.sql"
+        ],
+        "runtime_metadata": [],
+        "hooks": []
+      },
+      "metafield_model_callers": 12,
+      "direct_catalog_macro_model_files": 102
+    }
+  }
+}
