@@ -173,7 +173,7 @@ def compile_capture(args):
         plan["coverage"]["compilation_scope"] = compilation_scope
         if compilation_scope != "whole_project":
             plan["compilation_errors"]["whole_project"] = compiled.stdout + compiled.stderr
-        if args.require_complete and (not plan["selected_bodies_available"] or (capture is not None and not capture["generation_completed"])):
+        if args.require_complete and not (capture["generation_completed"] if capture is not None else plan["selected_bodies_available"]):
             raise ValueError("Selected capture is incomplete: " + json.dumps(plan["coverage"]))
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({"dbt_capture": plan}, indent=2) + "\n")

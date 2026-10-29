@@ -237,8 +237,10 @@ End hooks cannot consume synthetic execution results.
 failure aborts export. `--allow-partial --select ...` can retain an independent
 component after whole-project compilation fails. Capture can also compile against
 future relation schemas. Missing bodies and original errors remain explicit.
-`--require-complete` requires bodies in the selected declared dependency closure
-and, when capture is enabled, successful conditional SQL generation. It does not
+`--require-complete` requires successful conditional SQL generation when capture
+is enabled; otherwise it requires bodies in the selected declared dependency
+closure. Seeds and unit-test materializations can produce adapter SQL without a
+standalone compiled body. It does not
 certify physical lineage, input freshness or complete wire SQL.
 
 The preceding normal dbt compile can access the warehouse; its database reads
