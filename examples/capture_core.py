@@ -194,7 +194,7 @@ def capture(request):
                     if len(parts) == 2 and parts[0] in state["databases"]:
                         state["databases"][parts[0]]["schemas"].setdefault(parts[1], {"relations": {}})
                 if isinstance(expression, exp.Create):
-                    if isinstance(expression.this, exp.Schema):
+                    if isinstance(expression.this, exp.Schema) and expression.this.expressions and all(isinstance(column, exp.ColumnDef) for column in expression.this.expressions):
                         declared_columns[relation_key(expression.this.this)] = [
                             {"name": normalize_identifiers(column.this.copy(), dialect=adapter_type).name,
                              "data_type": column.kind.sql(dialect=adapter_type)}
