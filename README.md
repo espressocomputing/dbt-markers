@@ -173,7 +173,7 @@ warehouse query history. If statements reach Snowflake, they execute ordinary
 `select 1` queries. Hook query failures abort the run; there is no separate receipt
 acknowledgment from Nitro. No model-completion events or run results are sent.
 
-## Compiled planning prototype (unmerged)
+## SQL capture prototype (unmerged)
 
 `examples/plan.py` now writes `dbt_markers.sql_capture.v1` under `dbt_capture`.
 The filename is retained, but the client captures evidence rather than planning

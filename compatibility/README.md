@@ -1,5 +1,8 @@
 ## Current capture contract
 
+[Current export verification](sql-capture-results.json) records the capture-only
+contract checks, separately from historical planning evidence.
+
 The client now exports `dbt_markers.sql_capture.v1` (`dbt_capture`): original
 manifests/run results, exact SQL and bindings, selected IDs, invocation context,
 catalog inputs and explicit generation gaps. Comparison, hashes, parameter
