@@ -46,7 +46,8 @@ significant.
 **Every statement:** `dbt_markers` (package version), `invocation_id`,
 `which`, `invocation_command`, `invocation_vars`, `full_refresh`,
 `run_started_at` (UTC, ISO 8601), `dbt_version`, `project_name`,
-`target_name`, `target_database`, `target_schema`.
+`target_name`, `target_database`, `target_schema`. The optional Core runner
+integration also emits structured `invocation_args` on every marked statement.
 
 **Statements that belong to a node:** `node_unique_id`, `node_resource_type`,
 `node_package_name`, `node_name`, `node_alias`, `node_original_file_path`,
@@ -61,6 +62,69 @@ invocation context, PR id, git SHA and branch), with the name lower-cased.
 `invocation_command` always starts with `dbt` and is collapsed onto one line.
 The `--vars` value is shown as `<redacted>` there and is recorded word for
 word in `invocation_vars`.
+
+## Programmatic Core invocations
+
+Core builds `flags.INVOCATION_COMMAND` from the Python process's `sys.argv`,
+not the arguments passed to `dbtRunner.invoke()`. In a worker process this can
+produce just `"dbt"` or capture unrelated worker arguments. Core's query-comment
+context also omits `invocation_args_dict` and the selection flags. Ordinary
+markers cannot recover that information from a model's name or directory.
+
+After `dbt deps`, replace the runner import in the application launching Core:
+
+```python
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path("dbt_packages/dbt_markers").resolve()))
+from dbt_markers_runner import dbtRunner
+
+result = dbtRunner().invoke(["build", "--selector", "nexus-core"])
+```
+
+Resolve the package path relative to your dbt project if the worker runs elsewhere.
+Keep the existing `query-comment` configuration. No job label or hook is needed.
+The bridge temporarily extends Core's Jinja flags with an allowlist of its actual
+parsed arguments, including keyword overrides and dbt defaults. It restores Core's
+original getter when `invoke()` returns. Like Core's runner, this integration uses
+process-global flags: run concurrent invocations in separate processes.
+This Python integration is for Core, not Fusion or the dbt Cloud CLI.
+
+Every marked statement, including setup queries without a node, then carries:
+
+```json
+"invocation_args": {
+  "which": "build",
+  "project_dir": "/worker/project",
+  "select": [],
+  "exclude": [],
+  "selector": "nexus-core",
+  "vars": {},
+  "full_refresh": false
+}
+```
+
+Available fields also include `profile`, `target`, `defer`, `state`, `defer_state`,
+`favor_state`, `indirect_selection`, `resource_types`, `exclude_resource_types`,
+and `empty`. Values retain their JSON types; fields absent in a Core version are
+omitted. `invocation_command` reflects the arguments passed to `invoke()`;
+`invocation_args` is authoritative for keyword overrides. `invocation_vars` is
+JSON-serialized from the parsed vars when using the bridge.
+
+Consumers can group each query by project, target, command, and selection without
+looking up its invocation or observing another model. Keep the fields themselves:
+this package does not prescribe a hash or job identity. Absolute checkout/state
+paths and date-valued vars can change between runs; two schedules with identical
+arguments still describe the same workload. Without the runner integration,
+`invocation_args` is omitted rather than claiming an empty selection.
+
+Reproduce the missing command and verify the bridge against a disposable DuckDB
+project using an environment with Core and dbt-duckdb installed:
+
+```sh
+python compatibility/invocation.py --directory /tmp/markers-invocation
+```
 
 ## Deliver the graph before model execution
 
@@ -176,7 +240,7 @@ acknowledgment from Nitro. No model-completion events or run results are sent.
 ## Privacy
 
 The comment is stored in your warehouse's query history, and anyone who can
-read that history can read it. `node_meta`, `invocation_vars` and
+read that history can read it. `node_meta`, `invocation_vars`, `invocation_args.vars` and
 `dbt_cloud_run_reason` are copied exactly as given, so do not put secrets or
 personal data in `meta` or `--vars`; use `env_var()` for secrets instead.
 Opt-in graph comments also reveal project structure and relation names. The graph
