@@ -71,7 +71,7 @@
         only when the value is a non-empty string. -#}
     {%- set typed = ["full_refresh", "node_ref_names", "node_depends_on", "node_tags", "node_meta"] -%}
     {%- set fields = {
-        "dbt_markers": "1.0.0",
+        "dbt_markers": "1.1.0",
         "invocation_id": invocation_id,
         "which": flags.WHICH,
         "invocation_command": words | join(" ") if command is string and command.strip() != "" else none,

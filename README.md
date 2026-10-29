@@ -2,13 +2,14 @@
 
 A dbt package that appends a one-line JSON comment to every SQL statement dbt
 runs, recording which invocation and which node issued it. It is a single
-macro used through dbt's `query-comment` setting: by default it runs no SQL,
-adds no hooks and issues no extra statements. Optional graph delivery uses an
-`on-run-start` hook, described below.
+macro used through dbt's `query-comment` setting, plus an `on-run-start` hook
+that adds one `select 1` statement per run recording dbt's arguments. Optional
+graph delivery uses a second, opt-in `on-run-start` hook. Both are described
+below.
 
 ```sql
 select ... from analytics.stg_orders
-/* {"dbt_markers": "1.0.0", "invocation_id": "0b1f…", "which": "build", …,
+/* {"dbt_markers": "1.1.0", "invocation_id": "0b1f…", "which": "build", …,
     "node_unique_id": "model.jaffle_shop.orders", "node_ref_names": ["stg_orders", "stg_payments"], …} */
 ```
 
@@ -21,7 +22,7 @@ Supports Snowflake, on dbt-core 1.6 or later and on dbt Fusion.
    ```yaml
    packages:
      - git: "https://github.com/espressocomputing/dbt-markers.git"
-       revision: v1.0.0
+       revision: v1.1.0
    ```
 
 2. Add to `dbt_project.yml`, replacing any existing `query-comment` block:
@@ -72,8 +73,8 @@ on-run-start:
   - "{{ dbt_markers.emit_manifest() if dbt_markers.emit_manifest is defined else '' }}"
 ```
 
-Pin a full commit containing `emit_manifest` in `packages.yml` and rerun
-`dbt deps`. The `v1.0.0` tag predates graph delivery; the guarded hook above lets
+Pin `v1.1.0` or later in `packages.yml` and rerun `dbt deps`. The `v1.0.0`
+tag predates graph delivery; the guarded hook above lets
 you roll back to it and retain ordinary markers. Short commit hashes are not
 portable across engines; use all 40 characters or a published tag.
 This is opt-in; installing the package alone sends no graph.
@@ -173,12 +174,27 @@ warehouse query history. If statements reach Snowflake, they execute ordinary
 `select 1` queries. Hook query failures abort the run; there is no separate receipt
 acknowledgment from Nitro. No model-completion events or run results are sent.
 
+## Run marker
+
+Run in-process (`dbtRunner().invoke(args)`), dbt sets `invocation_command` from
+the host's own command line, often just `dbt`, and the comment cannot see the
+selection. So every run that fires `on-run-start` hooks also runs one statement
+recording dbt's own arguments:
+
+```sql
+select 1 /* {"dbt_markers_run": {"invocation_id": "0b1f…", "args": {…}}} */
+```
+
+`args` is dbt's `invocation_args_dict`, including `--vars`. Commands that run no
+`on-run-start` hooks (`compile`, `ls`, `run-operation`, …) emit nothing.
+
 ## Privacy
 
 The comment is stored in your warehouse's query history, and anyone who can
-read that history can read it. `node_meta`, `invocation_vars` and
-`dbt_cloud_run_reason` are copied exactly as given, so do not put secrets or
-personal data in `meta` or `--vars`; use `env_var()` for secrets instead.
+read that history can read it. `node_meta`, `invocation_vars`,
+`dbt_cloud_run_reason` and the run marker's `args` are copied exactly as given,
+so do not put secrets or personal data in `meta` or `--vars`; use `env_var()`
+for secrets instead.
 Opt-in graph comments also reveal project structure and relation names. The graph
 projection includes model and test source text, which can contain SQL literals.
 It omits arbitrary metadata. Existing query-comment settings still apply to
