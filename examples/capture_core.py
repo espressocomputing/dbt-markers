@@ -46,6 +46,7 @@ def capture(request):
     manager = adapter.ConnectionManager
     statements, blockers, lookups = [], [], []
     generated_relations = {}
+    declared_columns = {}
     generated_catalog = GeneratedCatalog(adapter_type, request.get("describe_connection_env"))
     materialized, post_hooks_finished = set(), set()
     conditional_gates, compiled_nodes = set(), {}
@@ -184,7 +185,16 @@ def capture(request):
             statements.append(statement)
             for expression in parsed:
                 generated_catalog.record(expression)
+                if isinstance(expression, exp.Create) and expression.args.get("kind") == "SCHEMA":
+                    parts = relation_key(expression.this)
+                    if len(parts) == 2 and parts[0] in state["databases"]:
+                        state["databases"][parts[0]]["schemas"].setdefault(parts[1], {"relations": {}})
                 if isinstance(expression, exp.Create):
+                    if isinstance(expression.this, exp.Schema):
+                        declared_columns[relation_key(expression.this.this)] = [
+                            {"name": normalize_identifiers(column.this.copy(), dialect=adapter_type).name,
+                             "data_type": column.kind.sql(dialect=adapter_type)}
+                            for column in expression.this.expressions if isinstance(column, exp.ColumnDef)]
                     table = expression.this.this if isinstance(expression.this, exp.Schema) else expression.this
                     if isinstance(table, exp.Table):
                         generated_relations[relation_key(table)] = hashlib.sha256(sql.encode()).hexdigest()
@@ -270,11 +280,13 @@ def capture(request):
         relations = schema_state(database, schema)["relations"]
         if relations is None:
             blocked("relation_metadata_missing:" + database + "." + schema)
-        return [self.Relation.create(database=database, schema=schema, identifier=name, type=data["type"])
+        return [self.Relation.create(database=database, schema=schema, identifier=name, type=data["type"], quote_policy={"database": True, "schema": True, "identifier": True})
                 for name, data in relations.items()]
 
     def columns(self, relation):
         table = sqlglot.parse_one(str(relation), read=adapter_type, into=exp.Table)
+        if relation_key(table) in declared_columns:
+            return [self.Column.create(column["name"], column["data_type"]) for column in declared_columns[relation_key(table)]]
         generated = generated_relations.get(relation_key(table))
         if generated or relation_key(table) in generated_catalog.queries:
             derived = state.get("derived_columns", {}).get(generated)
