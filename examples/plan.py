@@ -273,7 +273,7 @@ def compile_plan(args):
             if args.full_refresh:
                 capture_args.append("--full-refresh")
             request_path, capture_path = root / "capture-request.json", root / "capture.json"
-            request_path.write_text(json.dumps({"warehouse_state": state, "command": args.command, "dbt_args": capture_args}))
+            request_path.write_text(json.dumps({"warehouse_state": state, "command": args.command, "dbt_args": capture_args, "describe_connection_env": getattr(args, "describe_connection_env", None)}))
             request_path.chmod(0o600)
             subprocess.run([str(args.capture_python.absolute()), str(Path(__file__).with_name("capture_core.py")), "--request", str(request_path), "--output", str(capture_path)], cwd=project, capture_output=True, text=True, check=True)
             capture = json.loads(capture_path.read_text())
@@ -311,6 +311,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dbt", default="dbt")
     parser.add_argument("--runtime-parameter-column", action="append", default=[], metavar="COLUMN=PARAMETER", help="Explicit output-literal parameter contract for stable comparison; preserves exact SQL")
+    parser.add_argument("--describe-connection-env", help="Snowflake connector options for compile-only generated-column description; same role/session as dbt")
     parser.add_argument("--capture-python", type=Path, help="Python from the matching dbt Core environment")
     parser.add_argument("--warehouse-state", type=Path, help="Explicit metadata/results snapshot for offline SQL capture")
     parser.add_argument("--command", choices=["build", "run", "test"], default="build")

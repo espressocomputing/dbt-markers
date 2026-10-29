@@ -29,6 +29,8 @@ def capture(request):
     from dbt.task import run as run_task
     from dbt.artifacts.schemas.run import RunStatus
 
+    from capture_catalog import GeneratedCatalog
+
     state = request["warehouse_state"]
     if state["schema"] != "dbt_markers.warehouse_state.v1":
         raise ValueError("Unsupported warehouse state schema")
@@ -40,6 +42,7 @@ def capture(request):
     manager = adapter.ConnectionManager
     statements, blockers, lookups = [], [], []
     generated_relations = {}
+    generated_catalog = GeneratedCatalog(adapter_type, request.get("describe_connection_env"))
     materialized, post_hooks_finished = set(), set()
     phase = ContextVar("capture_sql_phase", default="adapter")
     lock = Lock()
@@ -149,6 +152,7 @@ def capture(request):
         with lock:
             statements.append(statement)
             for expression in parsed:
+                generated_catalog.record(expression)
                 if isinstance(expression, exp.Create):
                     table = expression.this.this if isinstance(expression.this, exp.Schema) else expression.this
                     if isinstance(table, exp.Table):
@@ -166,7 +170,7 @@ def capture(request):
                     or (limit and isinstance(limit.expression, exp.Literal) and limit.expression.this == "0")):
                 return None
             schema = {database: {name: {table: {column["name"]: column["data_type"] for column in data.get("columns", [])}
-                                      for table, data in values["relations"].items()}
+                                      for table, data in (values["relations"] or {}).items()}
                                  for name, values in details["schemas"].items()}
                       for database, details in state["databases"].items()}
             if any(not isinstance(projection, (exp.Alias, exp.Column, exp.Star))
@@ -241,6 +245,8 @@ def capture(request):
         if generated:
             derived = state.get("derived_columns", {}).get(generated)
             if derived is None:
+                derived = generated_catalog.describe(table)
+            if derived is None:
                 blocked("derived_column_metadata_missing:" + generated)
             return [self.Column.create(column["name"], column["data_type"]) for column in derived]
         database, schema, name = relation_key(table)
@@ -297,13 +303,18 @@ def capture(request):
     run_task.ModelRunner.execute = execute_model
     run_task.ModelRunner._build_run_model_result = model_result
     run_task.get_execution_status = hook_status
-    result = dbtRunner().invoke(request["dbt_args"])
+    try:
+        result = dbtRunner().invoke(request["dbt_args"])
+    finally:
+        generated_catalog.close()
     return {
         "schema": "dbt_markers.execution_capture.v1",
         "adapter_type": adapter_type,
         "versions": {"dbt_core": version("dbt-core"), "adapter": version("dbt-" + adapter_type), "sqlglot": sqlglot.__version__},
         "command": request["command"],
-        "offline": True,
+        "offline": not bool(request.get("describe_connection_env")),
+        "workload_executed": False,
+        "generated_column_descriptions": generated_catalog.descriptions,
         "submission_boundary": "dbt_adapter",
         "query_comments_omitted": True,
         "assumptions": ["supplied metadata is current", "captured statements succeed if executed"],
