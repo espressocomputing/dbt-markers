@@ -55,5 +55,19 @@
     "separate_compile_and_capture_invocation_sql_preserved": true,
     "submission_sequence_preserved": true,
     "missing_catalog_results_reported_as_blockers": true
-  }
+  },
+  "intercepted_compilation": {
+    "dbt_core": "1.12.6",
+    "compile_time_create_captured": true,
+    "materialization_create_captured": true,
+    "warehouse_unchanged": true,
+    "unguarded_generation_rejected": true
+  },
+  "artifact_import": {
+    "native_2_0_9": "passed",
+    "core_1_12_6": "passed",
+    "executes_dbt_during_import": false
+  },
+  "native_upfront_materialization": "unsupported; rejected before project execution",
+  "historical_export_checks": "artifact_export cases above predate mandatory compilation interception"
 }
