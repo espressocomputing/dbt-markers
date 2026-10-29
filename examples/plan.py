@@ -247,6 +247,10 @@ def compile_plan(args):
                 selected.append(node["unique_id"])
         if not selected:
             raise ValueError("Selection contains no executable resources")
+        native_checks = None
+        if getattr(args, "validate_native_checks", False):
+            checked = subprocess.run([args.dbt, "check", *common, *selection], cwd=project, capture_output=True, text=True, check=True)
+            native_checks = {"status": "passed", "output": checked.stdout, "scope": "requested selection"}
         command = [args.dbt, "--quiet", "--write-json", "compile", *common]
         if args.full_refresh:
             command.append("--full-refresh")
@@ -300,6 +304,7 @@ def compile_plan(args):
         elif args.warehouse_state:
             raise ValueError("--warehouse-state requires --capture-python")
         plan = make_plan(manifest, results, selected, context, previous, capture)
+        plan["coverage"]["native_v2_check_gates"] = native_checks or "not_verified"
         if args.require_complete and not plan["compiled_selection_complete"]:
             raise ValueError("Selected plan has unresolved nodes/context: " + json.dumps({"nodes": plan["unresolved_nodes"], "context": plan["unresolved_context"]}))
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -311,6 +316,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dbt", default="dbt")
     parser.add_argument("--runtime-parameter-column", action="append", default=[], metavar="COLUMN=PARAMETER", help="Explicit output-literal parameter contract for stable comparison; preserves exact SQL")
+    parser.add_argument("--validate-native-checks", action="store_true", help="Run native dbt check before compiling; unsupported commands or failed checks fail planning")
     parser.add_argument("--plan-through-test-gates", action="store_true", help="Capture downstream SQL conditional on tests passing, without evaluating test outcomes")
     parser.add_argument("--describe-connection-env", help="Snowflake connector options for compile-only generated-column description; same role/session as dbt")
     parser.add_argument("--capture-python", type=Path, help="Python from the matching dbt Core environment")

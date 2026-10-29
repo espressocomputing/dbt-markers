@@ -295,11 +295,13 @@ def capture(request):
     original_test = TestRunner.execute
 
     def execute_test(self, test, manifest):
+        first_blocker = len(blockers)
         try:
             return original_test(self, test, manifest)
         except DbtRuntimeError:
             key = test.unique_id
-            if not request.get("plan_through_test_gates") or key not in materialized or key not in post_hooks_finished or any(item["node_id"] == key and item["stage"] == "sql_generation" for item in blockers):
+            new_blockers = [item for item in blockers[first_blocker:] if item["node_id"] == key]
+            if not new_blockers or not request.get("plan_through_test_gates") or key not in materialized or key not in post_hooks_finished or any(item["node_id"] == key and item["stage"] == "sql_generation" for item in blockers):
                 raise
             conditional_gates.add(key)
             return RunResult(node=compiled_nodes.get(key, test), status=TestStatus.Pass,
