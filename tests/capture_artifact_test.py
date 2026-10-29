@@ -20,6 +20,8 @@ class CaptureArtifactTest(unittest.TestCase):
         self.assertEqual(artifact["manifest"]["nodes"]["model.p.a"]["compiled_code"], sql)
         self.assertTrue(artifact["selected_bodies_available"])
         self.assertFalse({"changes", "plan_hash", "graph_hash", "nodes", "execution_edges"} & artifact.keys())
+        capture["manifest"] = {"nodes": {"model.p.a": {"resource_type": "model", "depends_on": {"nodes": []}}}}
+        self.assertTrue(make_capture(manifest, results, ["model.p.a"], {}, capture)["selected_bodies_available"])
         manifest["nodes"]["model.p.a"].pop("compiled_code")
         artifact = make_capture(manifest, results, ["model.p.a"], {})
         self.assertFalse(artifact["selected_bodies_available"])

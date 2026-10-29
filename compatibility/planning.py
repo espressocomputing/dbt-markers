@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from examples.plan import compile_plan
+from examples.plan import compile_capture
 
 
 def verify(dbt, root, smoke=False):
@@ -41,7 +41,7 @@ def verify(dbt, root, smoke=False):
                                output=root / (label + ".json"), require_complete=False)
         for key, value in overrides.items():
             setattr(args, key, value)
-        result = compile_plan(args)
+        result = compile_capture(args)
         assert result["schema"] == "dbt_markers.sql_capture.v1"
         assert not {"changes", "plan_hash", "graph_hash", "context_hash", "execution_edges", "nodes"} & result.keys()
         assert json.loads(args.output.read_text())["dbt_capture"] == result

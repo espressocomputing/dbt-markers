@@ -30,7 +30,9 @@ def make_capture(manifest, results, selected, context, capture=None):
             if parent not in required:
                 required.add(parent)
                 pending.append(parent)
-    available = {key for key, node in resources.items() if node.get("compiled") and node.get("compiled_code") and node.get("language", "sql") == "sql"}
+    available = {key for artifact in (manifest, effective) for collection in COLLECTIONS
+                 for key, node in artifact.get(collection, {}).items()
+                 if node.get("compiled") and node.get("compiled_code") and node.get("language", "sql") == "sql"}
     missing = {key for key, node in resources.items() if node["resource_type"] in EXECUTABLE and key not in available}
     return {
         "schema": SCHEMA,
@@ -55,12 +57,12 @@ def make_capture(manifest, results, selected, context, capture=None):
     }
 
 
-def compile_plan(args):
+def compile_capture(args):
     project = args.project_dir.resolve()
     output = args.output.resolve()
     if output.exists():
-        raise ValueError("Output already exists; use a new plan path")
-    with tempfile.TemporaryDirectory(prefix="dbt-markers-plan-") as temp:
+        raise ValueError("Output already exists; use a new capture path")
+    with tempfile.TemporaryDirectory(prefix="dbt-markers-capture-") as temp:
         common = ["--project-dir", str(project), "--target-path", temp, "--vars", args.vars]
         for name in ("profiles_dir", "target", "profile"):
             value = getattr(args, name)
@@ -158,14 +160,14 @@ def compile_plan(args):
                     manifest = captured_manifest
                     captured_results = capture_dir / "run_results.json"
                     if not captured_results.exists():
-                        raise ValueError("Capture could not produce planning artifacts after compilation failed")
+                        raise ValueError("Capture could not produce capture artifacts after compilation failed")
                     results = json.loads(captured_results.read_text())
             else:
                 capture["generation_completed"] = False
         elif args.warehouse_state:
             raise ValueError("--warehouse-state requires --capture-python")
         if results is None:
-            raise ValueError("Neither compilation nor capture produced planning artifacts")
+            raise ValueError("Neither compilation nor capture produced capture artifacts")
         plan = make_capture(manifest, results, selected, context, capture)
         plan["coverage"]["native_v2_check_gates"] = native_checks or "not_verified"
         plan["coverage"]["compilation_scope"] = compilation_scope
@@ -181,7 +183,7 @@ def compile_plan(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dbt", default="dbt")
-    parser.add_argument("--validate-native-checks", action="store_true", help="Run native dbt check before compiling; unsupported commands or failed checks fail planning")
+    parser.add_argument("--validate-native-checks", action="store_true", help="Run native dbt check before compiling; unsupported commands or failed checks abort capture")
     parser.add_argument("--plan-through-test-gates", action="store_true", help="Capture downstream SQL conditional on tests passing, without evaluating test outcomes")
     parser.add_argument("--describe-connection-env", help="Snowflake connector options for compile-only generated-column description; same role/session as dbt")
     parser.add_argument("--capture-python", type=Path, help="Python from the matching dbt Core environment")
@@ -203,7 +205,7 @@ def main():
     parser.add_argument("--allow-partial", action="store_true", help="Retry only the explicit selected component if whole-project compilation fails; preserve missing bodies as unresolved")
     args = parser.parse_args()
     try:
-        plan = compile_plan(args)
+        plan = compile_capture(args)
     except subprocess.CalledProcessError as error:
         parser.exit(1, error.stdout + error.stderr)
     except ValueError as error:
