@@ -20,11 +20,20 @@ def snapshot(connection, schemas):
         cursor.execute("show schemas in database " + quoted(database))
         columns = [column[0].lower() for column in cursor.description]
         names = [dict(zip(columns, row, strict=True))["name"] for row in cursor.fetchall()]
+        if len(names) >= 10000:
+            raise ValueError("SHOW SCHEMAS may be truncated; narrow catalog collection is required")
         values = {name: {"relations": None} for name in names}
         databases[database] = {"schemas": values}
         for schema in requested:
             if schema not in values:
                 raise ValueError("Requested schema is absent or inaccessible: " + database + "." + schema)
+            cursor.execute("show objects in schema " + quoted(database) + "." + quoted(schema))
+            fields = [column[0].lower() for column in cursor.description]
+            objects = [dict(zip(fields, row, strict=True)) for row in cursor.fetchall()]
+            if len(objects) >= 10000:
+                raise ValueError("SHOW OBJECTS may be truncated")
+            if any(str(obj.get(flag, "N")).upper() in {"Y", "YES", "TRUE"} for obj in objects for flag in ("is_dynamic", "is_iceberg", "is_interactive")):
+                raise ValueError("Catalog capture supports standard tables and views only")
             cursor.execute("select table_name, table_type, is_transient from " + quoted(database) +
                            ".information_schema.tables where table_schema = %s order by table_name", (schema,))
             relations = {}
