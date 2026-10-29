@@ -182,10 +182,15 @@ change propagation, inferred execution gates or reuse decisions. Those belong in
 Nitro. Earlier plan-v3 artifacts and comparison CLI options are no longer used.
 
 ```sh
-python examples/plan.py --dbt /path/to/dbt \
+# Import artifacts produced by an existing dbt invocation, including native v2.
+python examples/plan.py --artifacts /path/to/target \
+  --warehouse-context account/role --output capture.json
+
+# Generate SQL using intercepted Python Core compilation and materialization.
+python examples/plan.py --dbt /path/to/core/bin/dbt \
+  --capture-python /path/to/core/bin/python --warehouse-state state.json \
   --project-dir /path/to/project --profiles-dir /path/to/profiles \
-  --command build --warehouse-context account/role \
-  --output capture.json
+  --command build --warehouse-context account/role --output capture.json
 ```
 
 The artifact preserves the full dbt manifest and run results, selected resource
@@ -233,9 +238,9 @@ block generation. `--plan-through-test-gates` allows downstream generation under
 an explicit tests-pass condition, without reporting tests as having passed.
 End hooks cannot consume synthetic execution results.
 
-`--validate-native-checks` runs actual `dbt check` and includes its receipt;
-failure aborts export. `--allow-partial --select ...` can retain an independent
-component after whole-project compilation fails. Capture can also compile against
+`--validate-native-checks` is rejected during intercepted generation. Run native
+checks in the ordinary project workflow and import its artifacts separately. An explicit `--select` can retain an independent component when intercepted
+whole-project compilation fails. Capture can also compile against
 future relation schemas. Missing bodies and original errors remain explicit.
 `--require-complete` requires successful conditional SQL generation when capture
 is enabled; otherwise it requires bodies in the selected declared dependency
@@ -243,8 +248,11 @@ closure. Seeds and unit-test materializations can produce adapter SQL without a
 standalone compiled body. It does not
 certify physical lineage, input freshness or complete wire SQL.
 
-The preceding normal dbt compile can access the warehouse; its database reads
-are not traced. Capture assumes trusted projects using standard adapters. Python
+Compilation now runs under the same adapter interception as materialization.
+Its submissions and blockers are preserved in `compilation_capture`. There is no
+unintercepted compile fallback. Generating SQL requires a supported Python Core
+runtime and supplied metadata; artifact import executes no dbt commands. The
+importer cannot establish whether producing supplied artifacts caused side effects. Capture assumes trusted projects using standard adapters. Python
 models, arbitrary catalog mutations, result-dependent SQL, parallel microbatch,
 other adapters/versions and hidden procedure dependencies remain limits. The
 server must interpret these gaps; no Nitro consumer or capture transport exists.
@@ -280,3 +288,15 @@ one target only, use
 ## License
 
 MIT
+
+
+### Native dbt v2 boundary
+
+The installed native dbt 2.0.9 exports artifacts but does not expose the Python
+adapter interception hooks. Full upfront materialization capture remains
+unsupported. `--artifacts` preserves its existing manifest/run results without
+executing the engine; it does not recover missing materialization statements.
+Passing its Python executable to `--capture-python` fails before project execution.
+Native record/replay requires prior recorded outcomes; it is not a fresh dry run.
+The native `--no-introspect` implementation also uses mock adapter behavior and
+has adapter-specific exceptions, so it is not substituted for accurate capture.

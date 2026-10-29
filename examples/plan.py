@@ -16,7 +16,7 @@ def make_capture(manifest, results, selected, context, capture=None):
     if manifest["metadata"]["invocation_id"] != results["metadata"]["invocation_id"]:
         raise ValueError("Manifest and results belong to different invocations")
     artifact_source = results["args"]["which"]
-    if artifact_source != "compile" and (capture is None or artifact_source != capture["command"]):
+    if artifact_source != "compile" and capture is not None and artifact_source != capture["command"]:
         raise ValueError("Capture requires compile artifacts or matching capture artifacts")
     effective = capture.get("manifest", manifest) if capture else manifest
     resources = {key: node for collection in COLLECTIONS for key, node in effective.get(collection, {}).items()}
@@ -58,10 +58,29 @@ def make_capture(manifest, results, selected, context, capture=None):
 
 
 def compile_capture(args):
-    project = args.project_dir.resolve()
     output = args.output.resolve()
     if output.exists():
         raise ValueError("Output already exists; use a new capture path")
+    if getattr(args, "artifacts", None):
+        manifest = json.loads((args.artifacts / "manifest.json").read_text())
+        results = json.loads((args.artifacts / "run_results.json").read_text())
+        selected = [result["unique_id"] for result in results["results"]]
+        artifact = make_capture(manifest, results, selected, {"warehouse_context": args.warehouse_context, "artifact_origin": "supplied_files"})
+        artifact["coverage"]["selection_source"] = "run_results; original selector not reconstructed"
+        artifact["coverage"]["compilation_side_effects"] = "not_observed; importer executes no dbt commands"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps({"dbt_capture": artifact}, indent=2) + "\n")
+        return artifact
+    if not args.capture_python or not args.warehouse_state:
+        raise ValueError("Generating SQL requires --capture-python and --warehouse-state so compilation is intercepted. For native dbt v2, import existing artifacts with --artifacts; upfront materialization capture needs native engine interception.")
+    if not args.project_dir:
+        raise ValueError("--project-dir is required for SQL generation")
+    supported = subprocess.run([str(args.capture_python.absolute()), "-c", "from dbt.adapters.factory import get_adapter_class_by_name; from dbt.task.run import ModelRunner"], capture_output=True, text=True)
+    if supported.returncode:
+        raise ValueError("This runtime does not expose Python Core capture hooks. Native dbt v2 supports --artifacts import only; no warehouse commands were run.")
+    if getattr(args, "validate_native_checks", False):
+        raise ValueError("Native checks must run outside capture; import their artifacts instead")
+    project = args.project_dir.resolve()
     with tempfile.TemporaryDirectory(prefix="dbt-markers-capture-") as temp:
         common = ["--project-dir", str(project), "--target-path", temp, "--vars", args.vars]
         for name in ("profiles_dir", "target", "profile"):
@@ -91,17 +110,16 @@ def compile_capture(args):
         if args.full_refresh:
             command.append("--full-refresh")
         # Compile the whole project; selection is an independent execution mask.
-        compiled = subprocess.run(command, cwd=project, capture_output=True, text=True, check=not (getattr(args, "allow_partial", False) or args.capture_python))
+        state = json.loads(args.warehouse_state.read_text())
+        request_path = Path(temp) / "compile-request.json"
+        compile_capture_path = Path(temp) / "compile-capture.json"
+        request_path.write_text(json.dumps({"warehouse_state": state, "command": "compile", "dbt_args": command[1:], "describe_connection_env": getattr(args, "describe_connection_env", None)}))
+        request_path.chmod(0o600)
+        compiled = subprocess.run([str(args.capture_python.absolute()), str(Path(__file__).with_name("capture_core.py")), "--request", str(request_path), "--output", str(compile_capture_path)], cwd=project, capture_output=True, text=True, check=True)
+        compilation_capture = json.loads(compile_capture_path.read_text())
+        compiled.returncode = 0 if compilation_capture["generation_completed"] else 1
         root = Path(temp)
         compilation_scope = "whole_project"
-        if compiled.returncode and not args.capture_python:
-            if not args.select:
-                raise ValueError("Partial compilation requires an explicit --select for the component to retain")
-            root = root / "selected-component"
-            selected_command = list(command)
-            selected_command[selected_command.index("--target-path") + 1] = str(root)
-            subprocess.run([*selected_command, *selection], cwd=project, capture_output=True, text=True, check=True)
-            compilation_scope = "selected_component"
         if compiled.returncode and args.capture_python:
             manifest, results = parsed_manifest, None
             compilation_scope = "capture_selected"
@@ -169,6 +187,9 @@ def compile_capture(args):
         if results is None:
             raise ValueError("Neither compilation nor capture produced capture artifacts")
         plan = make_capture(manifest, results, selected, context, capture)
+        plan["compilation_capture"] = compilation_capture
+        plan["coverage"]["compile_time_database_reads"] = "captured_adapter_submissions_and_metadata_lookups"
+        plan["coverage"]["compilation_side_effects"] = "standard adapter execution intercepted; not a sandbox for custom plugins"
         plan["coverage"]["native_v2_check_gates"] = native_checks or "not_verified"
         plan["coverage"]["compilation_scope"] = compilation_scope
         if compilation_scope != "whole_project":
@@ -189,7 +210,8 @@ def main():
     parser.add_argument("--capture-python", type=Path, help="Python from the matching dbt Core environment")
     parser.add_argument("--warehouse-state", type=Path, help="Explicit metadata/results snapshot for offline SQL capture")
     parser.add_argument("--command", choices=["build", "run", "test"], default="build")
-    parser.add_argument("--project-dir", type=Path, required=True)
+    parser.add_argument("--artifacts", type=Path, help="Import existing manifest.json/run_results.json without executing dbt; supports native v2")
+    parser.add_argument("--project-dir", type=Path)
     parser.add_argument("--profiles-dir", type=Path)
     parser.add_argument("--profile")
     parser.add_argument("--target")
