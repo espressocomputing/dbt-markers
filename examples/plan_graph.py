@@ -53,7 +53,7 @@ def physical_reads(sql, dialect, database=None, schema=None):
             root_with = statement.args.get("with_")
             root_ctes = {cte.alias for cte in root_with.expressions} if root_with else set()
             for table in statement.find_all(exp.Table):
-                if id(table) in cte_refs or (write_only and table is target):
+                if isinstance(statement, exp.Drop) or id(table) in cte_refs or (write_only and table is target):
                     continue
                 if table is not target and not table.db and table.name in root_ctes and table.find_ancestor(exp.CTE) is None:
                     continue
