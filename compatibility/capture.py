@@ -49,6 +49,18 @@ def verify(python, root):
     assert sql[2] == "select 20" and "create or replace" in sql[3] and "view" in sql[3]
     assert len(sql) == 4
 
+    project_config = project / "dbt_project.yml"
+    profile = project / "profiles.yml"
+    original_project, original_profile = project_config.read_text(), profile.read_text()
+    project_config.write_text(original_project + "quoting: {database: false, schema: false, identifier: false}\n")
+    profile.write_text(original_profile.replace("schema: SCHEMA", "schema: schema"))
+    existing = copy.deepcopy(state)
+    existing["databases"]["DATABASE"]["schemas"]["SCHEMA"]["relations"]["A"] = {"type": "table", "columns": []}
+    result = run("existing_unquoted_schema", select="a", snapshot=existing)
+    assert result["generation_completed"], result
+    project_config.write_text(original_project)
+    profile.write_text(original_profile)
+
     a.write_text("{{ config(materialized='incremental', incremental_strategy='append') }}\nselect 1 as id\n")
     incremental = copy.deepcopy(state)
     incremental["databases"]["DATABASE"]["schemas"]["SCHEMA"]["relations"]["A"] = {"type": "table", "columns": [{"name": "ID", "data_type": "NUMBER"}]}
