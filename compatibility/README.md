@@ -11,11 +11,16 @@ The sections below record historical prototype verification; their plan/hash
 assertions are not the current interface. SQL-generation comparisons remain
 useful evidence.
 
-`compatibility/planning.py` retains its filename but now tests artifact export,
-exact compiled strings, declared dependencies, selected-component recovery,
-vars, selection, incremental bodies and hook preservation. It no longer tests
-server-side planning. `compatibility/capture.py` still exercises real Core adapter
-capture; explicit derived-column fixtures now use exact CREATE SQL keys.
+`compatibility/planning.py` now verifies importing original artifacts from a
+local fixture without invoking dbt during export. `compatibility/safe_capture.py`
+checks that compile-time writes are intercepted, the local warehouse remains
+unchanged, and unsupported native generation fails before project execution.
+`compatibility/capture.py` exercises real Core adapter capture; explicit
+derived-column fixtures use exact CREATE SQL keys.
+
+Native v2 upfront materialization interception remains unsupported; native
+artifact import is verified. No ordinary `dbt compile` fallback is allowed in
+the generator. Previous export checks below predate this restriction.
 
 # Compatibility verification
 
