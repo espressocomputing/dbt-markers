@@ -39,12 +39,13 @@ def descendants(roots, nodes):
     return affected
 
 
-def make_plan(manifest, results, selected, context, previous=None, capture=None):
+def make_plan(manifest, results, selected, context, previous=None, capture=None, allow_partial=False):
     if manifest["metadata"]["invocation_id"] != results["metadata"]["invocation_id"]:
         raise ValueError("Manifest and compile results belong to different invocations")
     if results["args"]["which"] != "compile":
         raise ValueError("Planning requires dbt compile artifacts")
-    if any(result["status"] != "success" for result in results["results"]):
+    failed_compilations = {result["unique_id"]: result.get("message") for result in results["results"] if result["status"] != "success"}
+    if failed_compilations and not allow_partial:
         raise ValueError("Compilation did not succeed for every result")
     resources = {key: node for collection in COLLECTIONS for key, node in manifest.get(collection, {}).items()}
     if set(selected) - resources.keys():
@@ -54,7 +55,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
     for key, node in sorted(resources.items()):
         kind = node["resource_type"]
         dependencies = sorted(node.get("depends_on", {}).get("nodes", []))
-        reasons = []
+        reasons = ["compilation_failed"] if key in failed_compilations else []
         macro_ids = set()
         pending = list(node.get("depends_on", {}).get("macros", []))
         while pending:
@@ -143,6 +144,7 @@ def make_plan(manifest, results, selected, context, previous=None, capture=None)
     plan = {
         "schema": SCHEMA,
         "invocation_id": metadata["invocation_id"],
+        "compilation_errors": failed_compilations,
         "sql_scope": "compiled_node_body_and_adapter_submissions" if capture else "compiled_node_body",
         "execution_sql_complete": False,
         "selected_sql_generation_complete": bool(capture and capture["generation_completed"]),
@@ -255,7 +257,7 @@ def compile_plan(args):
         if args.full_refresh:
             command.append("--full-refresh")
         # Compile the whole project; selection is an independent execution mask.
-        subprocess.run(command, cwd=project, capture_output=True, text=True, check=True)
+        subprocess.run(command, cwd=project, capture_output=True, text=True, check=not getattr(args, "allow_partial", False))
         root = Path(temp)
         manifest = json.loads((root / "manifest.json").read_text())
         results = json.loads((root / "run_results.json").read_text())
@@ -309,7 +311,7 @@ def compile_plan(args):
                 capture["generation_completed"] = False
         elif args.warehouse_state:
             raise ValueError("--warehouse-state requires --capture-python")
-        plan = make_plan(manifest, results, selected, context, previous, capture)
+        plan = make_plan(manifest, results, selected, context, previous, capture, allow_partial=getattr(args, "allow_partial", False))
         plan["coverage"]["native_v2_check_gates"] = native_checks or "not_verified"
         if args.require_complete and not plan["compiled_selection_complete"]:
             raise ValueError("Selected plan has unresolved nodes/context: " + json.dumps({"nodes": plan["unresolved_nodes"], "context": plan["unresolved_context"]}))
@@ -344,6 +346,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--require-complete", action="store_true")
+    parser.add_argument("--allow-partial", action="store_true", help="Keep independently compiled nodes after a compile failure; retain failed nodes and affected dependencies as unresolved")
     args = parser.parse_args()
     try:
         plan = compile_plan(args)

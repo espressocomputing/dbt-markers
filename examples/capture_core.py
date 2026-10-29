@@ -185,6 +185,10 @@ def capture(request):
             statements.append(statement)
             for expression in parsed:
                 generated_catalog.record(expression)
+                if isinstance(expression, (exp.Create, exp.Drop)):
+                    target = expression.this.this if isinstance(expression.this, exp.Schema) else expression.this
+                    if isinstance(target, exp.Table):
+                        declared_columns.pop(relation_key(target), None)
                 if isinstance(expression, exp.Create) and expression.args.get("kind") == "SCHEMA":
                     parts = relation_key(expression.this)
                     if len(parts) == 2 and parts[0] in state["databases"]:
