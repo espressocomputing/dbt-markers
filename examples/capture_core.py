@@ -27,6 +27,10 @@ def capture(request):
     from dbt_common.clients.agate_helper import empty_table, table_from_data_flat
     from dbt_common.events.contextvars import get_node_info
     from dbt.task import run as run_task
+    from dbt.task.test import TestRunner
+    from dbt.compilation import Compiler
+    from dbt.artifacts.schemas.run import RunResult
+    from dbt.artifacts.schemas.results import TestStatus
     from dbt.artifacts.schemas.run import RunStatus
 
     from capture_catalog import GeneratedCatalog
@@ -44,6 +48,7 @@ def capture(request):
     generated_relations = {}
     generated_catalog = GeneratedCatalog(adapter_type, request.get("describe_connection_env"))
     materialized, post_hooks_finished = set(), set()
+    conditional_gates, compiled_nodes = set(), {}
     phase = ContextVar("capture_sql_phase", default="adapter")
     lock = Lock()
 
@@ -280,6 +285,30 @@ def capture(request):
             current_adapter.execute(sql, auto_begin=False, fetch=False)
         return RunStatus.Success, "CAPTURED; execution not performed"
 
+    original_compile = Compiler.compile_node
+
+    def compile_node(self, *args, **kwargs):
+        node = original_compile(self, *args, **kwargs)
+        compiled_nodes[node.unique_id] = node
+        return node
+
+    original_test = TestRunner.execute
+
+    def execute_test(self, test, manifest):
+        try:
+            return original_test(self, test, manifest)
+        except DbtRuntimeError:
+            key = test.unique_id
+            if not request.get("plan_through_test_gates") or key not in materialized or key not in post_hooks_finished or any(item["node_id"] == key and item["stage"] == "sql_generation" for item in blockers):
+                raise
+            conditional_gates.add(key)
+            return RunResult(node=compiled_nodes.get(key, test), status=TestStatus.Pass,
+                             timing=[], thread_id="capture", execution_time=0,
+                             message="CONDITIONAL: downstream SQL assumes this test passes; test was not executed",
+                             adapter_response={}, failures=None, batch_results=None)
+
+    Compiler.compile_node = compile_node
+    TestRunner.execute = execute_test
     original_hook_sql = run_task.RunTask.get_hook_sql
 
     def hook_sql(self, adapter, hook, idx, num_hooks, extra_context):
@@ -319,13 +348,15 @@ def capture(request):
         "query_comments_omitted": True,
         "assumptions": ["supplied metadata is current", "captured statements succeed if executed"],
         "metadata_queries_replaced_by_snapshot": True,
-        "generation_completed": result.success and not blockers,
+        "generation_completed": result.success and not any(item["node_id"] not in conditional_gates or item["stage"] != "result_validation" for item in blockers),
+        "conditional_test_gates": sorted(conditional_gates),
+        "execution_artifacts_are_synthetic": True,
         "materializations_generated": sorted(key for key in materialized & post_hooks_finished if key is not None and not any(item["node_id"] == key and item["stage"] == "sql_generation" for item in blockers)),
         "statements": statements,
         "blockers": blockers,
         "metadata_lookups": lookups,
         "error": str(result.exception) if result.exception else None,
-        "node_results": [{"node_id": item.node.unique_id, "status": str(item.status), "message": item.message}
+        "node_results": [{"node_id": item.node.unique_id, "status": "conditional" if item.node.unique_id in conditional_gates else str(item.status), "message": item.message}
                          for item in getattr(result.result, "results", [])],
     }
 
