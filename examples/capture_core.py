@@ -1,13 +1,12 @@
 """Capture Core adapter submissions offline, stopping on unknown results."""
 
 import argparse
-import hashlib
 import json
 import os
 import re
 from pathlib import Path
 from importlib.metadata import version
-from threading import Lock
+from threading import Lock, current_thread
 from contextvars import ContextVar
 
 
@@ -182,6 +181,8 @@ def capture(request):
         except SqlglotError:
             parsed = []
         with lock:
+            statement["sequence"] = len(statements)
+            statement["thread_name"] = current_thread().name
             statements.append(statement)
             for expression in parsed:
                 generated_catalog.record(expression)
@@ -206,7 +207,7 @@ def capture(request):
                             for column in expression.this.expressions if isinstance(column, exp.ColumnDef)]
                     table = expression.this.this if isinstance(expression.this, exp.Schema) else expression.this
                     if isinstance(table, exp.Table):
-                        generated_relations[relation_key(table)] = hashlib.sha256(sql.encode()).hexdigest()
+                        generated_relations[relation_key(table)] = sql
         return statement
 
     def zero_row_projection(sql):

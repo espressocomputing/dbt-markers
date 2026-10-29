@@ -2,7 +2,6 @@
 
 import argparse
 import copy
-import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -68,7 +67,7 @@ def verify(python, root):
     assert not result["generation_completed"]
     assert any(item["reason"].startswith("derived_column_metadata_missing:") for item in result["blockers"])
     create_sql = next(statement["sql"] for statement in result["statements"] if "temporary view" in statement["sql"])
-    incremental["derived_columns"] = {hashlib.sha256(create_sql.encode()).hexdigest(): [{"name": "ID", "data_type": "NUMBER(1,0)"}]}
+    incremental["derived_columns"] = {create_sql: [{"name": "ID", "data_type": "NUMBER(1,0)"}]}
     result = run("incremental_append", select="a", snapshot=incremental)
     assert result["generation_completed"], result
     assert any("insert into" in statement["sql"].lower() for statement in result["statements"])
@@ -83,7 +82,7 @@ def verify(python, root):
     (project / "models/units.yml").write_text("unit_tests:\n  - name: b_unit\n    model: b\n    given:\n      - input: ref('a')\n        format: sql\n        rows: select 1 as id\n    expect:\n      format: sql\n      rows: select 1 as id\n")
     result = run("unit_missing_projection_metadata", "test", "test_type:unit", incremental)
     create_sql = next(statement["sql"] for statement in result["statements"] if "temporary table" in statement["sql"])
-    incremental["derived_columns"][hashlib.sha256(create_sql.encode()).hexdigest()] = [{"name": "ID", "data_type": "NUMBER(1,0)"}]
+    incremental["derived_columns"][create_sql] = [{"name": "ID", "data_type": "NUMBER(1,0)"}]
     result = run("unit_query", "test", "test_type:unit", incremental)
     unit_sql = [statement["sql"] for statement in result["statements"] if (statement["node_id"] or "").startswith("unit_test.")]
     assert any("actual_or_expected" in sql for sql in unit_sql), result

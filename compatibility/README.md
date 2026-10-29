@@ -1,3 +1,19 @@
+## Current capture contract
+
+The client now exports `dbt_markers.sql_capture.v1` (`dbt_capture`): original
+manifests/run results, exact SQL and bindings, selected IDs, invocation context,
+catalog inputs and explicit generation gaps. Comparison, hashes, parameter
+normalization, inferred physical lineage and execution gates were removed.
+The sections below record historical prototype verification; their plan/hash
+assertions are not the current interface. SQL-generation comparisons remain
+useful evidence.
+
+`compatibility/planning.py` retains its filename but now tests artifact export,
+exact compiled strings, declared dependencies, selected-component recovery,
+vars, selection, incremental bodies and hook preservation. It no longer tests
+server-side planning. `compatibility/capture.py` still exercises real Core adapter
+capture; explicit derived-column fixtures now use exact CREATE SQL keys.
+
 # Compatibility verification
 
 The package supports dbt `>=1.6.0,<3.0.0`. The sweep tests non-yanked stable

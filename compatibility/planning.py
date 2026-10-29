@@ -1,4 +1,4 @@
-"""Exercise planning and invalidation through real dbt compilation."""
+"""Verify lossless artifact capture through real dbt compilation."""
 
 import argparse
 import json
@@ -34,145 +34,64 @@ def verify(dbt, root, smoke=False):
     subprocess.run([dbt, "--quiet", "seed", "--project-dir", str(project), "--profiles-dir", str(project)], check=True, capture_output=True, text=True)
     records = {}
 
-    def plan(label, previous=None, **overrides):
-        args = SimpleNamespace(capture_python=None, warehouse_state=None, dbt=dbt, project_dir=project, profiles_dir=project, command="build", default_database="warehouse", default_schema="canary",
-                               profile=None, target="local", vars="{}", select="c", exclude=None,
-                               full_refresh=False, warehouse_context="duckdb/planning-canary/local",
-                               output=root / (label + ".json"), previous=root / (previous + ".json") if previous else None,
-                               require_complete=False)
+    def snapshot(label, **overrides):
+        args = SimpleNamespace(capture_python=None, warehouse_state=None, dbt=dbt, project_dir=project, profiles_dir=project,
+                               command="build", profile=None, target="local", vars="{}", select="c", exclude=None,
+                               full_refresh=False, warehouse_context="duckdb/capture-canary/local",
+                               output=root / (label + ".json"), require_complete=False)
         for key, value in overrides.items():
             setattr(args, key, value)
         result = compile_plan(args)
-        records[label] = {"plan_hash": result["plan_hash"], "changes": result["changes"], "unresolved_nodes": result["unresolved_nodes"]}
+        assert result["schema"] == "dbt_markers.sql_capture.v1"
+        assert not {"changes", "plan_hash", "graph_hash", "context_hash", "execution_edges", "nodes"} & result.keys()
+        assert json.loads(args.output.read_text())["dbt_capture"] == result
+        records[label] = result["coverage"]
         (root / "results.json").write_text(json.dumps(records, indent=2) + "\n")
         print(label, "passed", flush=True)
         return result
 
     a, b, c, other = ["model.planning_canary." + name for name in ("a", "b", "c", "other")]
-    baseline = plan("baseline")
-    assert baseline["compiled_selection_complete"] and not baseline["execution_sql_complete"]
-    assert baseline["nodes"][a]["compiled_sql"].startswith("select id + 0")
-    assert all("{{" not in node["compiled_sql"] for node in baseline["nodes"].values() if node["compiled_sql"])
+    baseline = snapshot("baseline")
+    assert baseline["selected_bodies_available"]
+    assert baseline["manifest"]["nodes"][a]["compiled_code"].startswith("select id + 0")
+    assert baseline["manifest"]["nodes"][c]["depends_on"]["nodes"] == [b]
     assert any(key.startswith("test.") for key in baseline["selected_resources"])
-    repeated = plan("repeat", "baseline")
+    repeated = snapshot("repeat")
     assert baseline["invocation_id"] != repeated["invocation_id"]
-    assert baseline["plan_hash"] == repeated["plan_hash"]
-    assert repeated["changes"]["affected"] == []
+    assert baseline["manifest"]["nodes"][a]["compiled_code"] == repeated["manifest"]["nodes"][a]["compiled_code"]
     (project / "models/broken.sql").write_text("{% if execute %}{{ exceptions.raise_compiler_error('unavailable lookup') }}{% endif %} select 1 as id")
-    partial = plan("partial_component", allow_partial=True, select="other", require_complete=True)
+    partial = snapshot("partial_component", allow_partial=True, select="other", require_complete=True)
     assert partial["coverage"]["compilation_scope"] == "selected_component"
-    assert partial["compiled_selection_complete"] and partial["nodes"][other]["compiled_sql"]
-    assert not partial["nodes"]["model.planning_canary.broken"]["compiled_sql"]
+    assert partial["selected_bodies_available"]
+    assert "model.planning_canary.broken" in partial["coverage"]["compiled_bodies"]["missing"]
+    assert "model.planning_canary.broken" in partial["manifest"]["nodes"]
     (project / "models/broken.sql").unlink()
     if smoke:
         return records
 
-    (project / "models/a.sql").write_text(files["models/a.sql"].replace("as id", "* 2 as id"))
-    changed = plan("model_edit", "baseline")
-    assert a in changed["changes"]["changed"]
-    assert {a, b, c}.issubset(changed["changes"]["affected"])
-    assert other in changed["changes"]["unchanged"]
-    (project / "models/a.sql").write_text(files["models/a.sql"])
-
-    (project / "macros/adjust.sql").write_text(files["macros/adjust.sql"].replace("+ {{", "+ 10 + {{"))
-    changed = plan("macro_edit", "baseline")
-    assert a in changed["changes"]["changed"] and c in changed["changes"]["affected"]
-    assert other in changed["changes"]["unchanged"]
-    (project / "macros/adjust.sql").write_text(files["macros/adjust.sql"])
-
-    changed = plan("vars_edit", "baseline", vars='{"offset": 7}')
-    assert "id + 7" in changed["nodes"][a]["compiled_sql"] and c in changed["changes"]["affected"]
-    changed = plan("selection_edit", "baseline", select="other")
-    assert changed["graph_hash"] == baseline["graph_hash"]
-    assert changed["plan_hash"] != baseline["plan_hash"] and changed["changes"]["selection_changed"]
-    assert changed["changes"]["affected"] == []
-
-    (project / "models/a.sql").write_text("{{ config(materialized='ephemeral') }}\n" + files["models/a.sql"])
-    changed = plan("ephemeral_edit", "baseline")
-    assert "__dbt__cte__a" in changed["nodes"][b]["compiled_sql"]
-    assert c in changed["changes"]["affected"] and other in changed["changes"]["unchanged"]
-    (project / "models/a.sql").write_text(files["models/a.sql"])
-
-    (project / "models/schema.yml").write_text(files["models/schema.yml"].replace("    schema: canary", "    schema: renamed"))
-    changed = plan("source_relation_edit", "baseline")
-    assert "source.planning_canary.raw.input" in changed["changes"]["changed"]
-    assert {a, b, c, other}.issubset(changed["changes"]["affected"])
-    (project / "models/schema.yml").write_text(files["models/schema.yml"])
-
-    (project / "tests/c_positive.sql").write_text(files["tests/c_positive.sql"].replace("< 0", "< 1"))
-    changed = plan("test_edit", "baseline")
-    assert changed["changes"]["changed"] == ["test.planning_canary.c_positive"]
-    assert c in changed["changes"]["unchanged"]
-    (project / "tests/c_positive.sql").unlink()
-    changed = plan("test_removed", "baseline")
-    assert changed["changes"]["removed"] == ["test.planning_canary.c_positive"]
-    (project / "tests/c_positive.sql").write_text(files["tests/c_positive.sql"])
-
-    (project / "models/c.sql").write_text(files["models/c.sql"].replace("ref('b')", "ref('other')"))
-    (project / "models/b.sql").unlink()
-    changed = plan("rewired_removed_parent", "baseline")
-    assert b in changed["changes"]["removed"] and c in changed["changes"]["affected"]
-    (project / "models/c.sql").write_text(files["models/c.sql"])
-    (project / "models/b.sql").write_text(files["models/b.sql"])
-
+    changed = snapshot("vars_edit", vars='{"offset": 7}')
+    assert "id + 7" in changed["manifest"]["nodes"][a]["compiled_code"]
+    assert changed["context"]["vars"] == '{"offset": 7}'
+    changed = snapshot("selection_edit", select="other")
+    assert other in changed["selected_resources"] and c not in changed["selected_resources"]
+    assert c in changed["manifest"]["nodes"]
     (project / "models/a.sql").write_text("{{ config(materialized='incremental') }}\n" + files["models/a.sql"])
-    changed = plan("incremental_unresolved", "baseline")
-    assert "runtime_materialization:incremental" in changed["unresolved_nodes"][a]
-    assert c in changed["changes"]["selected_unresolved"] and not changed["compiled_selection_complete"]
-    try:
-        plan("strict_rejects_incremental", "baseline", require_complete=True)
-    except ValueError as error:
-        assert "unresolved nodes" in str(error)
-    else:
-        raise AssertionError("Strict planning accepted unresolved execution")
-    assert not (root / "strict_rejects_incremental.json").exists()
+    changed = snapshot("incremental_body")
+    assert changed["manifest"]["nodes"][a]["config"]["materialized"] == "incremental"
+    assert changed["manifest"]["nodes"][a]["compiled_code"]
+    assert not changed["coverage"]["adapter_sql_generated"]
     (project / "models/a.sql").write_text(files["models/a.sql"])
-
     (project / "models/b.sql").write_text("{{ config(pre_hook='select 1') }}\n" + files["models/b.sql"])
-    changed = plan("hook_unresolved", "baseline")
-    assert "runtime_hooks" in changed["unresolved_nodes"][b]
-    assert any(node["resource_type"] == "hook" and node["compiled_sql"] == "select 1" for node in changed["nodes"].values())
-    (project / "models/b.sql").write_text(files["models/b.sql"])
-
-    (project / "dbt_project.yml").write_text(files["dbt_project.yml"] + "on-run-start: ['select 1']\n")
-    changed = plan("project_hook_unresolved", "baseline")
-    assert any(edge["kind"] == "project_hook_order" for edge in changed["execution_edges"])
-    assert changed["compiled_selection_complete"]
-    (project / "dbt_project.yml").write_text(files["dbt_project.yml"])
-
-    (project / "models/units.yml").write_text("unit_tests:\n  - name: c_unit\n    model: c\n    given:\n      - input: ref('b')\n        rows: [{id: 1}]\n    expect:\n      rows: [{id: 1}]\n")
-    changed = plan("unit_test_unresolved", "baseline")
-    assert any(key.startswith("unit_test.") for key in changed["changes"]["selected_unresolved"])
-    (project / "models/units.yml").unlink()
-
+    changed = snapshot("hooks_preserved")
+    assert changed["manifest"]["nodes"][b]["config"]["pre-hook"][0]["sql"] == "select 1"
+    assert changed["manifest"]["macros"]
     try:
-        plan("empty_selection", "baseline", select="no_such_node")
+        snapshot("empty_selection", select="no_such_node")
     except ValueError as error:
         assert "no executable resources" in str(error)
     else:
         raise AssertionError("Empty selection accepted")
     assert not (root / "empty_selection.json").exists()
-
-    corrupted = json.loads((root / "baseline.json").read_text())
-    corrupted["dbt_plan"]["nodes"][a]["compiled_sql"] = "select 999 as id"
-    (root / "corrupted.json").write_text(json.dumps(corrupted))
-    try:
-        plan("corruption_rejected", "corrupted")
-    except ValueError as error:
-        assert "fingerprint mismatch" in str(error)
-    else:
-        raise AssertionError("Corrupt previous plan accepted")
-    assert not (root / "corruption_rejected.json").exists()
-
-    changed = plan("warehouse_identity_edit", "baseline", warehouse_context="different-account/role")
-    assert changed["changes"]["context_changed"] and c in changed["changes"]["affected"]
-
-    (project / "seeds/input.csv").write_text("id\n3\n4\n")
-    subprocess.run([dbt, "--quiet", "seed", "--full-refresh", "--project-dir", str(project), "--profiles-dir", str(project)], check=True, capture_output=True, text=True)
-    changed = plan("input_data_edit", "baseline")
-    assert c in changed["changes"]["affected"]
-    assert not changed["execution_sql_complete"]
-    assert not changed["input_state_verified"] and not changed["execution_reuse_authorized"]
     return records
 
 
