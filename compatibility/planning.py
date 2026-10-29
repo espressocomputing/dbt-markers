@@ -58,6 +58,12 @@ def verify(dbt, root, smoke=False):
     assert baseline["invocation_id"] != repeated["invocation_id"]
     assert baseline["plan_hash"] == repeated["plan_hash"]
     assert repeated["changes"]["affected"] == []
+    (project / "models/broken.sql").write_text("{% if execute %}{{ exceptions.raise_compiler_error('unavailable lookup') }}{% endif %} select 1 as id")
+    partial = plan("partial_component", allow_partial=True, select="other", require_complete=True)
+    assert partial["coverage"]["compilation_scope"] == "selected_component"
+    assert partial["compiled_selection_complete"] and partial["nodes"][other]["compiled_sql"]
+    assert not partial["nodes"]["model.planning_canary.broken"]["compiled_sql"]
+    (project / "models/broken.sql").unlink()
     if smoke:
         return records
 

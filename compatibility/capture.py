@@ -21,14 +21,14 @@ def verify(python, root):
              "databases": {"DATABASE": {"schemas": {"SCHEMA": {"relations": {}}}}}}
     records = {}
 
-    def run(label, command="run", select=None, snapshot=None):
+    def run(label, command="run", select=None, snapshot=None, conditional=False):
         target = root / label
         target.mkdir()
         args = ["--quiet", "--write-json", command, "--project-dir", str(project),
                 "--profiles-dir", str(project), "--target-path", str(target / "target")]
         if select:
             args.extend(["--select", select])
-        request = {"warehouse_state": snapshot or state, "command": command, "dbt_args": args}
+        request = {"warehouse_state": snapshot or state, "command": command, "dbt_args": args, "plan_through_test_gates": conditional}
         (target / "request.json").write_text(json.dumps(request))
         process = subprocess.run([python, str(Path(__file__).parents[1] / "examples/capture_core.py"),
                                   "--request", str(target / "request.json"), "--output", str(target / "capture.json")],
@@ -89,6 +89,11 @@ def verify(python, root):
     assert any("actual_or_expected" in sql for sql in unit_sql), result
     assert not result["generation_completed"] and any(item["stage"] == "result_validation" for item in result["blockers"])
     assert "unit_test.capture_canary.b.b_unit" in result["materializations_generated"]
+    result = run("unit_conditional_downstream", "build", "b", incremental, conditional=True)
+    assert result["generation_completed"], result
+    assert "unit_test.capture_canary.b.b_unit" in result["conditional_test_gates"]
+    assert "model.capture_canary.b" in result["materializations_generated"]
+    assert any(node["status"] == "conditional" for node in result["node_results"])
     (project / "models/units.yml").unlink()
 
     original_project = (project / "dbt_project.yml").read_text()
