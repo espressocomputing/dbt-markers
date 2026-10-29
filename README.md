@@ -239,7 +239,7 @@ execution. A plan-v2 baseline cannot be compared with plan v3.
 not captured. Unresolved selected dependencies remain explicit. Test SQL generation
 does not prove a passing test, and all plans require runtime validation.
 
-### Offline materialization capture
+### Materialization capture
 
 Add these options using Python from the same dbt Core environment:
 
@@ -278,7 +278,12 @@ Use actual catalog identifier case. A listed schema's relation map must be
 complete, including an empty map only when the schema really is empty. Missing
 metadata blocks capture. For newly generated relations, `derived_columns` maps
 the SHA-256 of the exact captured CREATE SQL to the column list; capture does not
-invent expression types. Optional `query_results` maps exact stripped SQL to
+invent expression types. Alternatively, `--describe-connection-env
+SNOWFLAKE_CONNECTION_JSON` uses Snowflake connector `cursor.describe` to resolve
+projection types without executing model SQL. It expands generated upstream
+relations into their SELECT definitions, supporting introspection before they
+exist. Use the same role/session configuration as dbt. This reports
+`offline: false`, `workload_executed: false`; unsupported structured types fail. Optional `query_results` maps exact stripped SQL to
 `{"columns": [...], "rows": [[...]], "kind": "metadata"}`. Only use that kind for
 metadata queries; data results default to `data` and retain their lineage.
 `examples/snowflake_catalog.py` collects live standard table/view metadata using
@@ -299,11 +304,14 @@ does not invalidate the plan. Collection is not an atomic catalog snapshot, and
 catalog/input state still needs validation before execution.
 
 Unknown results are lazy: discarded results allow generation to continue, but
-reading rows, column metadata or response values stops with an explicit blocker.
+reading rows or response values stops with an explicit blocker. Live description
+can provide column metadata.
 Provably empty projections and simple literal queries can be resolved locally.
 A unit test can have all its SQL captured while its outcome remains unknown;
-blockers distinguish SQL generation from result validation. Tests do not receive
-invented passing outcomes, so dependent work can remain uncaptured.
+blockers distinguish SQL generation from result validation. By default, unknown test outcomes stop dependent work.
+`--plan-through-test-gates` generates downstream SQL conditionally on tests
+passing. Gates report `conditional`, never observed passes; internal scheduler
+artifacts are explicitly marked synthetic.
 
 `sql_generation_complete` marks individual generated materializations;
 `selected_sql_generation_complete` requires successful capture of the selected
@@ -318,9 +326,24 @@ sandbox for arbitrary Python/custom plugins that open their own connections.
 Python models, hidden stored-procedure/UDF dependencies, runtime-dependent hook
 branches, missing metadata and results remain explicit limits. The preceding
 whole-project compile is a normal dbt compile, not offline capture. Compile-time
-database reads are not traced, and native-v2 local check gates are not verified;
-`coverage` records both limits. An end hook that reads execution `results` blocks
+database reads are not traced. `--validate-native-checks` runs actual native
+`dbt check` before compilation, aborting on failure and binding local validation
+gates to successful plans. If compilation needs future relation metadata, capture
+can supply actual selected compilation artifacts. Without capture,
+`--allow-partial --select ...` retries an independent component; missing bodies
+and parsed graph nodes remain explicit. An end hook that reads execution `results` blocks
 capture instead of consuming synthetic reporting values.
+
+Standard incrementals are not inherently dynamic SQL: SQL-internal predicates
+and `max()` execute later without changing query text. Live Snowflake verification
+covers merge, delete+insert, append, insert_overwrite, append/sync schema changes,
+full refresh, initial/existing snapshots and sequential microbatch with explicit
+`--event-time-start` / `--event-time-end`. Microbatch capture requires
+`concurrent_batches: false`; parallel session-local relation state is not modeled.
+Arbitrary catalog mutations, structured types and adapter/version combinations
+are not certified. Macros reading query values to construct SQL still need real
+results; unresolved constant expressions can also need implementation work.
+See [expanded evidence](compatibility/expanded-capture-results.json).
 
 `--require-complete` rejects unresolved selected compilation/lineage; it does not
 certify a complete wire trace. `execution_sql_complete`, `input_state_verified`

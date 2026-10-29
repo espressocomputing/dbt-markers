@@ -65,20 +65,18 @@ Our warehouse DAG must not be presented as the entire modern dbt execution graph
 - Supported design subset: ordinary SQL bodies and declared/physical dependencies,
   with standard table/view/test generation on the verified Snowflake Core path.
   Equivalent patterns in other projects are candidates, not certified runs.
-- Next conformance fixtures: `dbt_utils.star`/`union_relations`, schema evolution,
-  merge/delete+insert, partition replacement, microbatch and stored test failures.
-  Add adapters/version coverage deliberately rather than inferring it from SQL
-  parser dialect support.
-- Needed fallback boundary: retain useful independently compilable subgraphs when
-  another component needs query results. The current CLI compiles the whole
-  project first; a failed compile still prevents any plan output. It also does not
-  trace compile-time database reads, so a successful compile is not proof of
-  data-independent SQL. Both limits are explicit in the coverage contract.
+- Subsequent live fixtures cover standard incrementals, schema evolution,
+  sequential microbatch, snapshots, metadata-only introspection and stored test
+  failures. See [expanded evidence](expanded-capture-results.json). These fixtures
+  do not certify the surveyed projects or every package macro.
+- Independent selected components can survive unrelated compilation failures;
+  capture can compile against generated upstream schemas. Missing bodies and
+  untraced compile-time database reads remain explicit.
 - Keep result-dependent branches and telemetry hooks on actual execution. Never
   normalize arbitrary timestamps, UUIDs or business literals to force equality.
   The new invocation-column contract is opt-in and retains original SQL/values.
-- Model native-v2 checks as separate validation gates before claiming full build
-  orchestration coverage. Do not count semantic definitions as already-generated
+- Native-v2 checks can run as separate validation gates with
+  `--validate-native-checks`. Do not count semantic definitions as already-generated
   warehouse queries.
 
 No snapshots or Python-model coverage is established by this sample. No attempt

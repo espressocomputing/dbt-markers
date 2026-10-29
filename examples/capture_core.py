@@ -322,6 +322,8 @@ def capture(request):
     def execute_model(self, model, manifest):
         if model.language != "sql":
             blocked("non_sql_model_capture_unsupported")
+        if model.config.get("incremental_strategy") == "microbatch" and model.config.get("concurrent_batches") is not False:
+            blocked("microbatch_capture_requires_concurrent_batches_false")
         return original_execute(self, model, manifest)
 
     original_result = run_task.ModelRunner._build_run_model_result

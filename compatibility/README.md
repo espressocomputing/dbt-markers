@@ -130,7 +130,7 @@ warehouse before the real run. Setup/introspection SQL is not a complete match:
 some adapter metadata methods are replaced by snapshot lookups.
 
 Capture uses internal Core APIs and has only the version coverage stated above.
-It is not verified on Cloud or native v2. Neither input freshness, full wire SQL,
+The capture shim itself is not installed in Cloud or native v2. Neither input freshness, full wire SQL,
 query-history matching nor a Nitro consumer is certified by these checks.
 
 ## Plan v3 / full TPC-H Cloud verification
@@ -162,3 +162,24 @@ regression and blocking end hooks that read synthetic execution results.
 See the [six-repository public-project survey](public-project-survey.md) for
 additional coverage boundaries; that survey is static inspection, not a claim
 that all those projects execute successfully through this planner.
+
+
+## Metadata-backed generation and conditional gates
+
+[Expanded results](expanded-capture-results.json) record eight live Snowflake
+incremental cases: 32 DDL/DML statements matched actual execution, and capture
+left target data unchanged. Initial/existing snapshots matched three more
+statements. Microbatch uses an explicit window and sequential batches;
+parallel batches are rejected. Reproduce with `python compatibility/strategies.py
+--python /path/to/core/python --database NEW_DISPOSABLE_DATABASE
+--directory /new/artifact/path --connection-env SNOWFLAKE_CONNECTION_JSON`.
+The harness creates and drops its own database.
+
+Metadata-backed capture uses connector description without executing workloads.
+Additional cases cover generated upstream schema introspection, conditional
+data/unit test gates, stored failures, schema-only result access, blocking row
+reads, native-v2 passing/failing checks and independent component recovery.
+The offline suite now has 12 cases; local unit coverage has 16 tests. Full Core
+planning passed 17 cases, with partial recovery added to smoke coverage.
+Arbitrary adapters, catalog mutations, structured types, runtime telemetry and
+Nitro integration remain outside this verification.
