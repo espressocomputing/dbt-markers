@@ -101,14 +101,19 @@ source text is sent even for unselected nodes. Generic test source can be a Jinj
 macro call rather than SQL. At `on-run-start`, dbt has generally not compiled
 models and tests yet, so **compiled SQL is not guaranteed**. These fields are not
 the final materialization statements sent to the warehouse. Nitro must receive
-executed SQL from the normal query stream; this hook cannot provide all rendered
-queries in advance.
+submitted SQL from the normal query stream; this hook cannot provide all rendered
+queries in advance. Per-query markers now also include `node_compiled_code` and
+`node_language` when the engine exposes them, preserving the actual compiled body
+at that submission. The same body may be repeated across a node's statements.
 
 Selection is kept separate from the project graph; ephemeral nodes are logical
 dependencies, not necessarily separately executable work.
 
 This is a **graph projection, not the full `manifest.json` artifact**. It omits
-macros, docs, arbitrary config/meta, and disabled resources. Resources not
+macro bodies, docs, arbitrary config/meta, and disabled resources. It includes
+macro dependency IDs, refs/sources, selected materialization/hook/test settings,
+column names/types, unit-test definitions, defer relation metadata, and non-secret
+target/command context where exposed. Resources not
 exposed by a dbt engine's `graph` context cannot be exported (for example, Core
 1.10 does not expose the manifest's separate `unit_tests` collection there).
 Core 1.8–1.11 also omit unit tests from `selected_resources`, so absence of missing
@@ -172,6 +177,48 @@ not workload queries. Use the proxy request stream rather than delayed/truncated
 warehouse query history. If statements reach Snowflake, they execute ordinary
 `select 1` queries. Hook query failures abort the run; there is no separate receipt
 acknowledgment from Nitro. No model-completion events or run results are sent.
+
+## Native v2 with unchanged commands
+
+Customers keep their normal `dbt run` / `dbt build` commands after the one-time
+package/query-comment/startup-hook setup above. The implementation combines:
+
+1. Startup graph/source/context in one metadata query. It does not render project
+   Jinja or execute introspective queries to fill missing SQL.
+2. Server-side partial rendering of that payload. `examples/partial_render.py`
+   handles a restricted Jinja subset: constants, assignments, known conditions,
+   loops, simple filters, and declared relation references. Unknown variables,
+   macros, warehouse results, deferred refs and ephemeral CTE expansion remain
+   holes. No project Python, adapter methods or warehouse queries are executed.
+3. Original proxy SQL submissions plus compiled-body observations from query
+   comments. The receiver retains submission order and all observed body versions.
+
+```sh
+# These are server/development tools, not additional customer commands.
+python examples/manifest_transport.py proxy-statements.json --statement-array
+python examples/partial_render.py decoded-startup-graph.json
+```
+
+`proxy-statements.json` is an array of SQL strings or submission objects with a
+`sql` field. Objects preserve supplied bindings, query IDs and outcomes; missing
+fields are not reconstructed from SQL. Statement boundaries come from the proxy. Partial output is structured
+text fragments and unresolved holes, never an executable SQL string with guessed
+values. Fully rendered candidates still require server validation against native
+compiled/executed SQL; they are not native compiler output or reuse authorization.
+Existing `compiled_code` is returned unchanged as an observed compiled body.
+
+Native v2's symbolic Jinja implementation is currently exposed through linting;
+we verified that mode runs, but found no exported partial-SQL artifact or startup
+hook interface. The server subset is an explicit implementation, not a claim to
+invoke that native renderer. Native export of its symbolic representation would
+be the next extension point for greater macro/branch coverage.
+
+[Native upfront evidence](compatibility/native-upfront-results.json) records an
+ordinary v2.0.9 run with eight fixture models: zero startup compiled bodies, four
+server candidates exactly matching native compiled bodies, four explicitly
+partial bodies, and all seven non-ephemeral models' actual compiled bodies later
+observed in query comments. This is conformance evidence, not an OSS adoption or
+coverage percentage. See [implementation boundaries](compatibility/native-capture.md).
 
 ## SQL capture prototype (unmerged)
 

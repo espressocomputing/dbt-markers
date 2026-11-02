@@ -52,6 +52,8 @@ def extract_manifest(sql):
 
 
 def collect_capture(statements):
+    submissions = [{"sql": item} if isinstance(item, str) else dict(item) for item in statements]
+    statements = [item["sql"] for item in submissions]
     graph = extract_manifest("\n".join(statements))
     observations = []
     for sequence, sql in enumerate(statements):
@@ -70,14 +72,14 @@ def collect_capture(statements):
                                      "language": marker.get("node_language")})
     return {"schema": "dbt_markers.observed_capture.v1", "startup_graph": graph,
             "compiled_body_observations": observations,
-            "statements": [{"sequence": index, "sql": sql} for index, sql in enumerate(statements)],
-            "coverage": {"scope": "supplied_proxy_statements", "wire_bindings": "not_supplied", "execution_outcomes": "not_supplied"}}
+            "statements": [{**item, "sequence": index} for index, item in enumerate(submissions)],
+            "coverage": {"scope": "supplied_proxy_statements", "wire_bindings": "as_supplied", "execution_outcomes": "as_supplied"}}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("sql", type=Path, help="Captured SQL for one dbt invocation")
-    parser.add_argument("--statement-array", action="store_true", help="Input is a JSON array of original proxy SQL submissions; retain ordering and body observations")
+    parser.add_argument("--statement-array", action="store_true", help="Input is a JSON array of SQL strings or proxy submission objects; preserve supplied bindings/outcomes and body observations")
     args = parser.parse_args()
     result = collect_capture(json.loads(args.sql.read_text())) if args.statement_array else {"dbt_manifest": extract_manifest(args.sql.read_text())}
     json.dump(result, sys.stdout, indent=2)

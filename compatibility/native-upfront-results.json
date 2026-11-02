@@ -1,0 +1,50 @@
+{
+  "dbt_version": "2.0.9",
+  "ordinary_commands": [
+    "dbt deps",
+    "dbt run"
+  ],
+  "model_count": 8,
+  "startup_compiled_bodies": 0,
+  "candidate_bodies_matching_native": [
+    "constant",
+    "loop",
+    "reference",
+    "ephemeral"
+  ],
+  "explicit_partial_bodies": {
+    "result_value": [
+      "unresolved_call:run_query",
+      "unsupported_call",
+      "unknown_value:n"
+    ],
+    "variable": [
+      "unresolved_call:var"
+    ],
+    "custom_macro": [
+      "unresolved_call:answer"
+    ],
+    "ephemeral_consumer": [
+      "ephemeral_requires_cte_injection"
+    ]
+  },
+  "observed_compiled_body_nodes": [
+    "model.upfront.constant",
+    "model.upfront.custom_macro",
+    "model.upfront.ephemeral_consumer",
+    "model.upfront.loop",
+    "model.upfront.reference",
+    "model.upfront.result_value",
+    "model.upfront.variable"
+  ],
+  "query_count": 27,
+  "result_query_count": 1,
+  "result_query_after_startup": true,
+  "limits": "Restricted server renderer candidates are not native compilation or executable fusion plans",
+  "marker_compatibility": {
+    "native_v2": "2.0.9 run/build/unit-tests passed",
+    "python_core_1_12": "1.12.6 run/build and unit-test fallback passed",
+    "python_core_1_6": "1.6.0 run/build passed"
+  },
+  "unit_tests": 15
+}

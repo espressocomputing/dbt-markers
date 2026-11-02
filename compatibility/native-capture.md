@@ -30,3 +30,23 @@ would observe writes after execution and cannot satisfy the capture contract.
 The Python generator now runs compilation under its existing interception too;
 there is no unguarded compile fallback. Trusted custom plugins can still bypass
 standard adapters; this mechanism is not an operating-system sandbox.
+
+
+## Implemented package path
+
+The startup hook now exports additional source/configuration context without
+rendering project Jinja. Query comments carry available compiled bodies as
+ordinary statements pass through the proxy. `collect_capture` preserves those
+observations and original statement order. Customer command lines stay unchanged
+following the existing one-time marker/hook setup.
+
+The receiver-side partial renderer evaluates a deliberately restricted AST subset
+without invoking project functions. It emits candidates and explicit holes; it
+never fabricates row values or treats parse-time stub values as real results.
+Native symbolic lint supports hole propagation internally, but its tested CLI
+only returns lint diagnostics, not a partial-SQL capture artifact. We have not
+exposed or reimplemented its full macro renderer.
+
+The remaining native-engine work is exporting that richer symbolic representation
+or adding an execution-interception API. The implemented package path does not
+promise complete upfront materialization statements.

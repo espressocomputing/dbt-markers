@@ -85,6 +85,9 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(result["statements"][-1]["sql"], sql)
         self.assertEqual(result["compiled_body_observations"][0]["compiled_code"], "select 7")
         self.assertEqual(result["compiled_body_observations"][0]["sequence"], 1)
+        bound = collect_capture([*render(), {"sql": sql, "bindings": ["exact value"], "query_id": "qid"}])
+        self.assertEqual(bound["statements"][-1]["bindings"], ["exact value"])
+        self.assertEqual(bound["statements"][-1]["query_id"], "qid")
         with self.assertRaisesRegex(ValueError, "another invocation"):
             collect_capture([*render(), sql.replace("demo-invocation", "other")])
 
