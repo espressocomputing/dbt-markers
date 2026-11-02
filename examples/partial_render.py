@@ -24,7 +24,7 @@ class PartialRenderer:
         self.graph, self.node = graph, graph["nodes"][node_id]
         self.remaining = 10000
         self.context = {"execute": True, "invocation_id": graph["invocation_id"],
-                        "project_name": graph["project_name"], "target": graph.get("target", {})}
+                        "project_name": graph["project_name"], "target": graph.get("target", {}), "flags": graph.get("flags", {})}
         if self.node.get("relation_name") and self.node.get("materialized") != "ephemeral":
             self.context["this"] = self.node["relation_name"]
 
@@ -74,12 +74,14 @@ class PartialRenderer:
                 candidates = [n for n in candidates if n["resource_type"] == "source" and n.get("source_name") == args[0] and n.get("name") == args[1]]
             else:
                 raise Unresolved("unsupported_relation_call")
-            if len(candidates) != 1 or not candidates[0].get("relation_name"):
+            if len(candidates) != 1:
                 raise Unresolved("relation_resolution_unavailable")
             if candidates[0].get("materialized") == "ephemeral":
                 raise Unresolved("ephemeral_requires_cte_injection")
             if candidates[0].get("defer_relation"):
                 raise Unresolved("deferred_relation_requires_resolution")
+            if not candidates[0].get("relation_name"):
+                raise Unresolved("relation_resolution_unavailable")
             return candidates[0]["relation_name"]
         if type(expr) in OPERATORS:
             left, right = self.expression(expr.left, context), self.expression(expr.right, context)
