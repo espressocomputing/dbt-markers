@@ -51,11 +51,36 @@ def extract_manifest(sql):
     return manifest
 
 
+def collect_capture(statements):
+    graph = extract_manifest("\n".join(statements))
+    observations = []
+    for sequence, sql in enumerate(statements):
+        for comment in re.findall(r"/\*([\s\S]*?)\*/", sql):
+            try:
+                marker = json.loads(comment)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(marker, dict) or "dbt_markers" not in marker:
+                continue
+            if marker.get("invocation_id") != graph["invocation_id"]:
+                raise ValueError("Query marker belongs to another invocation")
+            if marker.get("node_compiled_code"):
+                observations.append({"sequence": sequence, "node_id": marker.get("node_unique_id"),
+                                     "compiled_code": marker["node_compiled_code"],
+                                     "language": marker.get("node_language")})
+    return {"schema": "dbt_markers.observed_capture.v1", "startup_graph": graph,
+            "compiled_body_observations": observations,
+            "statements": [{"sequence": index, "sql": sql} for index, sql in enumerate(statements)],
+            "coverage": {"scope": "supplied_proxy_statements", "wire_bindings": "not_supplied", "execution_outcomes": "not_supplied"}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("sql", type=Path, help="Captured SQL for one dbt invocation")
+    parser.add_argument("--statement-array", action="store_true", help="Input is a JSON array of original proxy SQL submissions; retain ordering and body observations")
     args = parser.parse_args()
-    json.dump({"dbt_manifest": extract_manifest(args.sql.read_text())}, sys.stdout, indent=2)
+    result = collect_capture(json.loads(args.sql.read_text())) if args.statement_array else {"dbt_manifest": extract_manifest(args.sql.read_text())}
+    json.dump(result, sys.stdout, indent=2)
     print()
 
 

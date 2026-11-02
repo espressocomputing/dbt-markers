@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from jinja2 import Environment, StrictUndefined
 
-from examples.manifest_transport import extract_manifest
+from examples.manifest_transport import collect_capture, extract_manifest
 
 
 def render(execute=True, model_count=3, mode="auto", context_overrides=None):
@@ -78,6 +78,15 @@ class ManifestTest(unittest.TestCase):
                          "select * from DB.SCHEMA.input where label = '/*雪*/'")
         self.assertEqual(graph["nodes"]["model.demo.m1"]["language"], "sql")
         self.assertNotIn("META_MUST_NOT_LEAK", sql)
+
+    def test_query_observations_preserve_sql_and_invocation(self):
+        sql = "create table t as select 7 /* " + json.dumps({"dbt_markers": "1.0.0", "invocation_id": "demo-invocation", "node_unique_id": "model.demo.m1", "node_compiled_code": "select 7"}) + " */"
+        result = collect_capture([*render(), sql])
+        self.assertEqual(result["statements"][-1]["sql"], sql)
+        self.assertEqual(result["compiled_body_observations"][0]["compiled_code"], "select 7")
+        self.assertEqual(result["compiled_body_observations"][0]["sequence"], 1)
+        with self.assertRaisesRegex(ValueError, "another invocation"):
+            collect_capture([*render(), sql.replace("demo-invocation", "other")])
 
     def test_large_graph_uses_one_query(self):
         queries = render(model_count=6000)
