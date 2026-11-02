@@ -24,11 +24,19 @@
                     "resource_type": node.resource_type,
                     "depends_on": node.get("depends_on", {}).get("nodes", []) | sort,
                 } -%}
-                {%- for field in ["name", "package_name", "database", "schema", "alias", "identifier", "relation_name", "language", "raw_code", "compiled_code"] -%}
+                {%- for field in ["name", "package_name", "database", "schema", "alias", "identifier", "relation_name", "language", "raw_code", "compiled_code", "compiled", "original_file_path", "source_name", "version", "latest_version", "refs", "sources", "columns", "test_metadata", "defer_relation", "given", "expect", "overrides"] -%}
                     {%- if node.get(field) is not none -%}
                         {%- do record.update({field: node[field]}) -%}
                     {%- endif -%}
                 {%- endfor -%}
+                {%- do record.update({"depends_on_macros": node.get("depends_on", {}).get("macros", []) | sort}) -%}
+                {%- set node_config = {} -%}
+                {%- for field in ["materialized", "incremental_strategy", "unique_key", "incremental_predicates", "on_schema_change", "full_refresh", "pre-hook", "post-hook", "sql_header", "enabled", "quoting", "contract", "event_time", "batch_size", "lookback", "begin", "concurrent_batches", "strategy", "updated_at", "check_cols", "invalidate_hard_deletes", "hard_deletes", "store_failures", "store_failures_as", "severity", "where", "limit", "fail_calc", "warn_if", "error_if"] -%}
+                    {%- if field in node.get("config", {}) -%}
+                        {%- do node_config.update({field: node.config[field]}) -%}
+                    {%- endif -%}
+                {%- endfor -%}
+                {%- do record.update({"config": node_config}) -%}
                 {%- if node.get("config", {}).get("materialized") is not none -%}
                     {%- do record.update({"materialized": node.config.materialized}) -%}
                 {%- endif -%}
@@ -68,6 +76,9 @@
             "dbt_version": dbt_version,
             "command": flags.WHICH,
             "target_name": target.name,
+            "target": {"name": target.name, "type": target.type if target.type is defined else none, "database": target.database if target.database is defined else none, "schema": target.schema if target.schema is defined else none},
+            "capture_phase": "startup_hook",
+            "coverage": {"compiled_sql": "when_exposed", "materialization_sql": "observe_query_stream", "macro_bodies": "not_exposed", "variables": "not_enumerated", "symbolic_rendering": "server_side", "extra_compilation_executed": false},
             "available_collections": graph.keys() | list | sort,
             "selected_resources": selected_resources | sort,
             "nodes": nodes,

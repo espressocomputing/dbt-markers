@@ -84,6 +84,8 @@
         "target_database": target.database,
         "target_schema": target.schema,
         "node_unique_id": node.unique_id if has_node else none,
+        "node_compiled_code": node.compiled_code if has_node and node.compiled_code is defined else none,
+        "node_language": node.language if has_node and node.language is defined else none,
         "node_resource_type": node.resource_type if has_node else none,
         "node_package_name": node.package_name if has_node else none,
         "node_name": node.name if has_node else none,
